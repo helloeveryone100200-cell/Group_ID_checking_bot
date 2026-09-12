@@ -1,0 +1,578 @@
+Build a completely NEW standalone Telegram bot from scratch.
+IMPORTANT:
+Do NOT inspect or read any existing repository.
+Do NOT modify or depend on any existing bot.
+Do NOT copy code from an existing project.
+This is a completely independent project.
+Keep the code simple, stable, and production-ready.
+The primary purpose is ONLY Telegram ID detection and duplicate checking.
+1. BOT PURPOSE
+The bot will be added to Telegram groups.
+Whenever the bot receives a group message, it should look for a standalone header named:
+ID
+Id
+iD
+id
+The matching must be case-insensitive.
+If a valid ID value exists after that header, the bot checks whether that ID has already been seen before.
+If the ID has never been seen:
+Save it.
+Do not send any notification.
+If the ID has already been seen:
+Detect it as a duplicate.
+Send a duplicate warning to the group.
+The bot must work automatically in EVERY Telegram group where the bot has been added.
+There must be NO manually configured group list.
+2. NO MONITORED_CHAT_IDS
+Do NOT create or require:
+MONITORED_CHAT_IDS=
+The bot must automatically monitor every group where it is currently a member and receives messages.
+Use the incoming Telegram update's chat_id automatically.
+If the bot is removed from a group, it naturally stops receiving messages from that group.
+Do not require an administrator to register groups manually.
+Private chats should not be processed by the ID detection system.
+3. ID DETECTION
+Recognize these:
+ID: 12345
+Id: 12345
+iD: 12345
+id: 12345
+Also recognize common separators:
+ID - 12345
+ID-12345
+ID : 12345
+ID=12345
+The matching must be case-insensitive.
+The ID header must be a standalone field/header.
+4. DO NOT FALSELY DETECT OTHER FIELDS
+These must NOT be treated as valid ID headers:
+Client ID: 12345
+Telegram ID: 12345
+User ID: 12345
+Order ID: 12345
+Identity: 12345
+ID Card: 12345
+Only a standalone field named exactly ID should trigger the ID checker.
+Use proper boundaries in the parser.
+5. MESSAGE WITHOUT ID
+If a message contains no standalone ID header:
+Example:
+Name: Aung
+Phone: 091234567
+Gmail: test@gmail.com
+Then:
+Ignore it completely.
+Do not query MongoDB.
+Do not save anything.
+Do not send any response.
+The bot should silently continue.
+6. EMPTY ID
+If the message contains:
+ID:
+or:
+ID -
+or:
+ID=
+or the value contains only whitespace:
+ID:
+Then:
+Ignore the message.
+Do not check duplicate.
+Do not save anything.
+Do not send any notification.
+Empty IDs must NEVER be stored.
+7. ID VALUE
+IDs can be numeric or alphanumeric.
+Examples:
+12345
+000123
+ABC123
+A-12345
+123-ABC
+Treat IDs as STRING values.
+Never convert IDs to integers.
+Very important:
+000123
+and:
+123
+must be treated as two different IDs.
+8. ID NORMALIZATION
+Only perform safe normalization:
+Strip leading/trailing whitespace.
+Normalize unnecessary surrounding whitespace.
+Do NOT:
+remove leading zeros
+remove hyphens
+remove letters
+convert to integer
+otherwise change the actual ID
+Example:
+ID: 000123
+must remain:
+"000123"
+9. MULTIPLE ID HEADERS
+If a single message contains more than one standalone ID header:
+Example:
+ID: 12345
+Name: Aung
+ID: 67890
+Treat the message as ambiguous.
+For Version 1:
+Do not check duplicate.
+Do not save anything.
+Do not send a notification.
+Log the ambiguity if useful.
+Do not guess which ID is correct.
+10. FIRST-TIME ID
+Example:
+ID: 12345
+If 12345 does not exist in the database:
+Save it.
+Record when it was first seen.
+Record which group it came from.
+Record the Telegram message information.
+Do not send a notification.
+Store useful metadata:
+id
+first_seen
+first_chat_id
+first_chat_title
+first_message_id
+first_user_id
+first_username
+first_display_name
+occurrence_count
+Initial occurrence_count should be 1.
+11. DUPLICATE ID
+If an ID already exists:
+Example:
+First message:
+ID: 12345
+Later message:
+ID: 12345
+The second message is a duplicate.
+Send a warning to the current group.
+Use a message similar to:
+⚠️ DUPLICATE ID
+ID: 12345
+First Seen:
+👤 @Aung
+📍 Sales Group
+🕐 2026-09-11 14:32
+Current:
+👤 @KoKo
+📍 Sales Group
+🕐 2026-09-11 15:08
+Total occurrences: 2
+Use actual available Telegram information.
+If username is unavailable, use display name or Telegram user ID.
+12. GLOBAL DUPLICATE CHECK
+Duplicate checking must be global across ALL groups.
+Example:
+Group A:
+ID: 12345
+Then later:
+Group B:
+ID: 12345
+The second occurrence must be detected as a duplicate.
+Do NOT maintain separate ID databases per group.
+One ID should be unique globally for this bot.
+13. DATABASE
+Use MongoDB.
+The MongoDB connection must use ONLY:
+MONGODB_URI=
+Do NOT require:
+MONGODB_DATABASE=
+The database name should be taken from the MongoDB URI.
+Example:
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/id_checker
+The database is:
+id_checker
+Use the database from the URI automatically.
+Do not require another environment variable for the database name.
+14. DATABASE STRUCTURE
+Use a primary collection such as:
+id_records
+Recommended document:
+{
+"id": "12345",
+"first_seen": "...",
+"first_chat_id": "...",
+"first_chat_title": "...",
+"first_message_id": "...",
+"first_user_id": "...",
+"first_username": "...",
+"first_display_name": "...",
+"occurrence_count": 1
+}
+Use a second collection such as:
+id_occurrences
+to store duplicate occurrences if needed.
+Example:
+{
+"id": "12345",
+"chat_id": "...",
+"chat_title": "...",
+"message_id": "...",
+"user_id": "...",
+"username": "...",
+"display_name": "...",
+"timestamp": "..."
+}
+You may improve the schema if there is a simpler and safer design.
+15. UNIQUE INDEX
+Create a MongoDB unique index on:
+id
+This is extremely important.
+The bot must be safe when two identical IDs arrive at almost exactly the same time.
+Do NOT rely only on:
+find → if not found → insert
+because this can cause race conditions.
+Use MongoDB's unique index and appropriate atomic/error handling.
+Two simultaneous submissions of the same ID must never create two primary ID records.
+16. DUPLICATE OCCURRENCE
+When a duplicate is detected:
+Do not create another primary record in id_records.
+Record the duplicate occurrence if using id_occurrences.
+Increment occurrence_count safely.
+Send the duplicate warning.
+Make the database operation concurrency-safe.
+17. TELEGRAM GROUP MONITORING
+The bot must automatically process messages from every group where it has been added and where Telegram allows the bot to receive the messages.
+Do NOT require group IDs in .env.
+The bot should use:
+update.effective_chat.id
+or the appropriate Telegram API field.
+Private chats should be ignored by the message-monitoring handler.
+18. TELEGRAM PRIVACY MODE
+Document that Telegram BotFather privacy settings may need to be configured so the bot can receive ordinary group messages.
+The bot needs to detect messages such as:
+ID: 12345
+even when the message is not a direct command to the bot.
+Explain the required Telegram group/privacy configuration in README.md.
+19. TEXT AND CAPTION
+Process:
+normal text messages
+media captions
+If an image/document contains a caption:
+ID: 12345
+the bot should process the caption.
+Do NOT implement OCR.
+Only process actual Telegram text/caption data.
+20. DO NOT DELETE MESSAGES
+The bot must NEVER delete user messages.
+It only monitors and sends duplicate warnings.
+21. ADMIN COMMANDS
+Implement these admin-only commands.
+/checkid
+Usage:
+/checkid 12345
+If found:
+🔎 ID CHECK
+ID: 12345
+Status: 🔴 DUPLICATE
+First Seen:
+👤 @Aung
+📍 Sales Group
+🕐 2026-09-11 14:32
+Occurrences: 3
+If not found:
+🔎 ID CHECK
+ID: 12345
+Status: 🟢 NOT FOUND
+This command must be read-only.
+Do NOT insert the ID when using /checkid.
+22. /stats
+Show:
+📊 ID CHECKER
+Today
+🟢 New IDs: 164
+🔴 Duplicates: 19
+All Time
+Unique IDs: 12,482
+Duplicate Occurrences: 1,731
+Use the database to calculate the statistics.
+23. /recent
+Show recently detected IDs.
+Example:
+🕐 RECENT IDS
+12345 — @Aung — 19:32
+67890 — @KoKo — 19:30
+000123 — @Moe — 19:27
+24. /duplicates
+Show recent duplicate occurrences.
+Example:
+🔴 RECENT DUPLICATES
+12345 — @KoKo — 19:32
+67890 — @Moe — 19:27
+Keep the output concise.
+25. ADMIN IDS
+Use:
+ADMIN_IDS=
+Example:
+ADMIN_IDS=123456789,987654321
+Only these Telegram user IDs may use admin commands.
+Do NOT hard-code admin IDs.
+Normal group members must not be able to use admin commands.
+26. ENVIRONMENT VARIABLES
+The ONLY required environment variables should be:
+BOT_TOKEN=
+MONGODB_URI=
+ADMIN_IDS=
+Do NOT require:
+MONGODB_DATABASE=
+MONITORED_CHAT_IDS=
+The final .env.example must look like:
+BOT_TOKEN=
+MONGODB_URI=
+ADMIN_IDS=
+27. PROJECT STRUCTURE
+Keep the project small and clean.
+Recommended:
+id-duplicate-checker/
+│
+├── bot.py
+├── config.py
+├── parser.py
+├── database.py
+├── handlers.py
+├── requirements.txt
+├── .env.example
+├── .gitignore
+├── README.md
+└── tests/
+└── test_parser.py
+Do not create unnecessary abstractions.
+Python 3.11+ is preferred.
+Use a current stable version of python-telegram-bot.
+28. PARSER FUNCTION
+Create:
+extract_id(text: str) -> Optional[str]
+Requirements:
+case-insensitive ID header
+multiline support
+support :, -, =
+ignore empty ID
+preserve leading zeros
+preserve alphanumeric values
+do not match Client ID / Telegram ID / User ID
+safely handle multiple ID headers
+return None when there is no valid ID
+29. REQUIRED PARSER TESTS
+Create unit tests for:
+ID: 12345
+Id: 12345
+iD: 12345
+id: 12345
+ID - 12345
+ID-12345
+ID : 12345
+ID=12345
+ID: 000123
+ID:
+ID -
+ID:
+No ID here
+Client ID: 12345
+Telegram ID: 12345
+User ID: 12345
+Order ID: 12345
+Identity: 12345
+ID Card: 12345
+Also test:
+multiline messages
+multiple ID headers
+whitespace
+alphanumeric IDs
+hyphenated IDs
+empty messages
+leading zeros
+30. ERROR HANDLING
+A bad message must NEVER stop the bot.
+Handle safely:
+Telegram API errors
+MongoDB errors
+MongoDB connection timeout
+duplicate key errors
+malformed messages
+parser errors
+unexpected exceptions
+Use Python logging.
+An error processing one message must not terminate the entire bot.
+31. LOGGING
+Use standard Python logging.
+Log:
+bot startup
+MongoDB connection
+new ID detected
+duplicate detected
+parser ambiguity
+database errors
+Telegram errors
+Never log:
+BOT_TOKEN
+MongoDB password
+sensitive message content unnecessarily
+32. STARTUP
+When starting:
+Load .env.
+Validate BOT_TOKEN.
+Validate MONGODB_URI.
+Validate ADMIN_IDS if required.
+Connect to MongoDB.
+Create required indexes.
+Start Telegram bot.
+Log that the bot is ready.
+If MongoDB is temporarily unavailable, retry gracefully.
+33. GRACEFUL SHUTDOWN
+Handle SIGTERM/SIGINT.
+Close MongoDB connections cleanly.
+The project should be suitable for deployment on:
+Render
+Railway
+VPS
+similar hosting services
+34. README
+Create a complete README with:
+project purpose
+requirements
+Python version
+installation
+.env configuration
+MongoDB setup
+BotFather setup
+privacy mode configuration
+how to add the bot to groups
+required Telegram permissions
+how to run locally
+deployment instructions
+admin commands
+ID detection rules
+duplicate behavior
+troubleshooting
+35. VERSION 1 — DO NOT ADD EXTRA FEATURES
+Do NOT implement:
+AI
+OCR
+image recognition
+web dashboard
+Telegram Mini App
+payment system
+external APIs
+unnecessary analytics
+complicated background workers
+unnecessary caching
+unnecessary frameworks
+The goal is a small and reliable ID duplicate checker.
+36. DEVELOPMENT ORDER
+Build in this order:
+Project structure
+Configuration
+ID parser
+Parser unit tests
+MongoDB connection
+Unique index
+Telegram group message handler
+New ID storage
+Duplicate detection
+Duplicate notification
+Admin commands
+Error handling
+README
+Full test
+Do not create the entire system as one huge untested implementation.
+37. ACCEPTANCE TESTS
+The following behavior MUST work.
+TEST 1:
+Message:
+ID: 12345
+Expected:
+Extract "12345"
+Save it
+No notification
+TEST 2:
+Message again:
+ID: 12345
+Expected:
+Detect duplicate
+Send warning
+Do not create a second primary ID record
+Increase occurrence count
+TEST 3:
+Message:
+Name: Aung
+Phone: 091234567
+Gmail: test@gmail.com
+Expected:
+Ignore
+No database lookup
+No database record
+No response
+TEST 4:
+Message:
+ID:
+Expected:
+Ignore
+No database record
+No response
+TEST 5:
+Message:
+Client ID: 12345
+Expected:
+Ignore
+No duplicate check
+TEST 6:
+Message:
+ID: 000123
+Expected:
+Store exactly "000123"
+TEST 7:
+Message:
+ID: 123
+Expected:
+Treat "123" as different from "000123"
+TEST 8:
+Group A:
+ID: 55555
+Later Group B:
+ID: 55555
+Expected:
+Detect duplicate globally
+TEST 9:
+Message:
+ID: 12345
+Name: Aung
+ID: 67890
+Expected:
+Treat as ambiguous
+Do not save
+Do not duplicate-check
+Do not notify
+38. FINAL REQUIREMENT
+This is a completely NEW standalone bot.
+Do not inspect or depend on any existing repository.
+The final implementation must use only:
+BOT_TOKEN=
+MONGODB_URI=
+ADMIN_IDS=
+No:
+MONGODB_DATABASE=
+MONITORED_CHAT_IDS=
+The bot automatically monitors every Telegram group where it is added and where it receives group messages.
+The most important priorities are:
+Correct ID detection
+Correct empty-ID handling
+Correct duplicate detection
+Global uniqueness
+Leading-zero preservation
+MongoDB unique-index protection
+Stable error handling
+Minimal and maintainable code
+Before declaring the project complete:
+Run all tests.
+Report test results.
+Verify the parser behavior against every acceptance test.
+Verify MongoDB unique-index behavior.
+Verify duplicate notification behavior.
+Verify admin permissions.
+Provide exact commands to install and run the bot.
