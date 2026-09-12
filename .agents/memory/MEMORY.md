@@ -1,0 +1,1 @@
+- [GitHub push authentication](github-push-auth.md) — prefer OAuth; if the user explicitly chooses a token, validate it privately and never persist it in Git config or files.
