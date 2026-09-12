@@ -14,7 +14,7 @@ LOGGER = logging.getLogger(__name__)
 class _HealthHandler(BaseHTTPRequestHandler):
     health_callback: Callable[[], dict[str, str]]
 
-    def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
+    def _serve_health(self, *, include_body: bool) -> None:
         if self.path not in {"/", "/healthz"}:
             self.send_error(404)
             return
@@ -24,7 +24,14 @@ class _HealthHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if include_body:
+            self.wfile.write(body)
+
+    def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
+        self._serve_health(include_body=True)
+
+    def do_HEAD(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
+        self._serve_health(include_body=False)
 
     def log_message(self, format: str, *args: object) -> None:
         LOGGER.info("health request: %s", format % args)
