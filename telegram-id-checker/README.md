@@ -105,9 +105,11 @@ The bot never stores an ID because `/checkid` was used.
 Telegram and runs a small `/healthz` endpoint on Render's `PORT`, so the
 service can be monitored externally.
 
-1. Push this `telegram-id-checker` directory to GitHub.
-2. In Render, create a new Blueprint from the repository and select
-   `render.yaml`, or create a Python web service with:
+1. Push this repository to GitHub.
+2. In Render, create a new Blueprint from the repository. The root
+   `render.yaml` points Render at the `telegram-id-checker` directory.
+   Alternatively, create a Python web service with:
+   - Root directory: `telegram-id-checker`
    - Build command: `pip install -r requirements.txt`
    - Start command: `python bot.py`
 3. Add `BOT_TOKEN`, `MONGODB_URI`, and `ADMIN_IDS` as Render environment
