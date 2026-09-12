@@ -17,6 +17,7 @@ from handlers import (
     handle_error,
     handle_group_message,
     recent,
+    start,
     stats,
 )
 from health_server import HealthServer
@@ -72,6 +73,7 @@ def main() -> None:
     application.bot_data["repository"] = repository
     application.bot_data["admin_ids"] = settings.admin_ids
 
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("checkid", check_id))
     application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("recent", recent))
