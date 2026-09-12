@@ -1,0 +1,7 @@
+python-telegram-bot>=22.0,<23.0
+pymongo>=4.13,<5.0
+python-dotenv>=1.1,<2.0
+
+# Test dependencies
+pytest>=8.3,<9.0
+mongomock>=4.3,<5.0
