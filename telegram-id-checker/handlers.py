@@ -357,7 +357,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not username:
         raise RuntimeError("Telegram bot username is unavailable")
     keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Add me to your chat!", url=f"https://t.me/{username}?startgroup=true")]]
+        [
+            [
+                InlineKeyboardButton(
+                    "Add me to your chat!",
+                    url=f"https://t.me/{username}?startgroup=true",
+                    style="primary",
+                )
+            ]
+        ]
     )
     repository: IDRepository = context.application.bot_data["repository"]
     welcome_template = _message_template(

@@ -7,7 +7,7 @@ import mongomock
 from telegram.constants import ChatType
 
 from database import IDRepository
-from handlers import _send_broadcast, clear_ids, control_panel
+from handlers import _send_broadcast, clear_ids, control_panel, start
 
 
 def _context(repository: IDRepository, *, admin_ids: frozenset[int]) -> SimpleNamespace:
@@ -75,6 +75,27 @@ def test_control_panel_is_only_sent_to_admins() -> None:
         "danger",
         "danger",
     ]
+
+
+def test_start_add_to_chat_button_is_primary() -> None:
+    repository = _repository()
+    message = SimpleNamespace(reply_text=AsyncMock())
+    context = _context(repository, admin_ids=frozenset())
+    context.bot.username = "example_bot"
+
+    asyncio.run(
+        start(
+            _update(200, message),
+            context,
+        )
+    )
+
+    message.reply_text.assert_awaited_once()
+    markup = message.reply_text.await_args.kwargs["reply_markup"]
+    button = markup.inline_keyboard[0][0]
+    assert button.text == "Add me to your chat!"
+    assert button.style == "primary"
+    assert button.url == "https://t.me/example_bot?startgroup=true"
 
 
 def test_broadcast_all_sends_only_to_registered_groups() -> None:
