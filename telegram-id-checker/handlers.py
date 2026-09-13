@@ -65,7 +65,7 @@ def _format_timestamp(value: datetime | None) -> str:
         return "unknown"
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%d")
 
 
 def _format_record(record: dict[str, Any], *, heading: str, occurrences_label: str) -> str:
@@ -73,7 +73,7 @@ def _format_record(record: dict[str, Any], *, heading: str, occurrences_label: s
         f"{heading}\n"
         f"ID: {record.get('id', '')}\n"
         f"👤 {record.get('user', 'unknown')}\n"
-        f"🕐 {_format_timestamp(record.get('date'))}\n"
+        f"📅 {_format_timestamp(record.get('date'))}\n"
         f"{occurrences_label}: {record.get('occurrence_count', 1)}"
     )
 
@@ -135,15 +135,15 @@ async def handle_group_message(
     current_actor = _actor(username, display_name, user_id)
     previous = result.previous_record or {}
     warning = (
-        "⚠️ DUPLICATE ID\n"
-        f"ID: {parsed.value}\n"
+        "⚠️ DUPLICATE ID\n\n"
+        f"ID: {parsed.value}\n\n"
         "First Seen:\n"
         f"👤 {previous.get('user', 'unknown')}\n"
-        f"🕐 {_format_timestamp(previous.get('date'))}\n"
+        f"📅 {_format_timestamp(previous.get('date'))}\n\n"
         "Current:\n"
         f"👤 {current_actor}\n"
-        f"🕐 {_format_timestamp(metadata.timestamp)}\n"
-        f"Total occurrences: {result.record.get('occurrence_count', 2)}"
+        f"📅 {_format_timestamp(metadata.timestamp)}\n\n"
+        f"📊 Total occurrences: {result.record.get('occurrence_count', 2)}"
     )
     try:
         await message.reply_text(warning)
