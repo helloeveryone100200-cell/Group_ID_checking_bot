@@ -7,7 +7,13 @@ import mongomock
 from telegram.constants import ChatType
 
 from database import IDRepository
-from handlers import _send_broadcast, clear_ids, control_panel, start
+from handlers import (
+    _send_broadcast,
+    clear_ids,
+    control_panel,
+    handle_panel_callback,
+    start,
+)
 
 
 def _context(repository: IDRepository, *, admin_ids: frozenset[int]) -> SimpleNamespace:
@@ -25,6 +31,18 @@ def _update(user_id: int, message: SimpleNamespace) -> SimpleNamespace:
         effective_user=SimpleNamespace(id=user_id),
         effective_chat=SimpleNamespace(type=ChatType.PRIVATE),
         effective_message=message,
+    )
+
+
+def _callback_update(user_id: int, data: str, query: SimpleNamespace) -> SimpleNamespace:
+    return SimpleNamespace(
+        effective_user=SimpleNamespace(id=user_id),
+        effective_chat=SimpleNamespace(type=ChatType.PRIVATE),
+        callback_query=SimpleNamespace(
+            data=data,
+            answer=query.answer,
+            edit_message_text=query.edit_message_text,
+        ),
     )
 
 
@@ -64,6 +82,7 @@ def test_control_panel_is_only_sent_to_admins() -> None:
         "Welcome Message",
         "Duplicate Warning",
         "Control Panel Message",
+        "Clear IDs",
         "Broadcast All",
         "Broadcast Single",
     ]
@@ -74,6 +93,7 @@ def test_control_panel_is_only_sent_to_admins() -> None:
         "primary",
         "primary",
         "primary",
+        "danger",
         "danger",
         "danger",
     ]
@@ -139,7 +159,7 @@ def test_broadcast_all_sends_only_to_registered_groups() -> None:
     assert sent_chat_ids == {"-1001", "-1002"}
 
 
-def test_clear_ids_requires_admin_confirmation() -> None:
+def test_clear_ids_shows_two_primary_options() -> None:
     repository = _repository()
     admin_message = SimpleNamespace(reply_text=AsyncMock())
 
@@ -153,5 +173,72 @@ def test_clear_ids_requires_admin_confirmation() -> None:
     admin_message.reply_text.assert_awaited_once()
     markup = admin_message.reply_text.await_args.kwargs["reply_markup"]
     buttons = [button for row in markup.inline_keyboard for button in row]
-    assert [button.text for button in buttons] == ["Confirm", "Cancel"]
-    assert [button.style for button in buttons] == ["success", "danger"]
+    assert [button.text for button in buttons] == [
+        "Clear ID Records",
+        "Processed Message IDs",
+    ]
+    assert [button.style for button in buttons] == ["primary", "primary"]
+
+
+def test_clear_id_records_requires_confirmation_and_preserves_processed_ids() -> None:
+    repository = _repository()
+    repository.id_records.insert_one({"id": "123", "occurrence_count": 1})
+    repository.claim_group_message("-1001", "message-1")
+    context = _context(repository, admin_ids=frozenset({100}))
+    option_query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
+
+    asyncio.run(
+        handle_panel_callback(
+            _callback_update(100, "panel:clear_ids:id_records", option_query),
+            context,
+        )
+    )
+
+    assert repository.id_records.count_documents({}) == 1
+    assert repository.processed_messages.count_documents({}) == 1
+    assert context.user_data["clear_ids_pending"] == "id_records"
+
+    confirm_query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
+    asyncio.run(
+        handle_panel_callback(
+            _callback_update(100, "panel:clear_ids:confirm", confirm_query),
+            context,
+        )
+    )
+
+    assert repository.id_records.count_documents({}) == 0
+    assert repository.processed_messages.count_documents({}) == 1
+
+
+def test_clear_processed_ids_requires_confirmation_and_preserves_id_records() -> None:
+    repository = _repository()
+    repository.id_records.insert_one({"id": "123", "occurrence_count": 1})
+    repository.claim_group_message("-1001", "message-1")
+    context = _context(repository, admin_ids=frozenset({100}))
+    option_query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
+
+    asyncio.run(
+        handle_panel_callback(
+            _callback_update(
+                100,
+                "panel:clear_ids:processed_messages",
+                option_query,
+            ),
+            context,
+        )
+    )
+
+    assert repository.id_records.count_documents({}) == 1
+    assert repository.processed_messages.count_documents({}) == 1
+    assert context.user_data["clear_ids_pending"] == "processed_messages"
+
+    confirm_query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
+    asyncio.run(
+        handle_panel_callback(
+            _callback_update(100, "panel:clear_ids:confirm", confirm_query),
+            context,
+        )
+    )
+
+    assert repository.id_records.count_documents({}) == 1
+    assert repository.processed_messages.count_documents({}) == 0

@@ -294,6 +294,11 @@ class IDRepository:
         result = self.id_records.delete_many({})
         return int(result.deleted_count)
 
+    def clear_processed_messages(self) -> int:
+        """Delete all processed-message idempotency records and return the count."""
+        result = self.processed_messages.delete_many({})
+        return int(result.deleted_count)
+
     def stats(self, start_of_day: datetime) -> dict[str, int]:
         today_query = {"date": {"$gte": start_of_day}}
         return {

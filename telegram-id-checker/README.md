@@ -106,16 +106,24 @@ Only Telegram user IDs listed in `ADMIN_IDS` can use these commands:
 - `/userlists` — show users attached to current ID records
 - `/grouplists` — show registered groups
 - `/broadcast` — open broadcast options
-- `/clear_ids` — privately request confirmation before clearing all stored ID records
+- `/clear_ids` — privately choose and confirm clearing either ID records or
+  processed message IDs
 
 The bot never stores an ID because `/checkid` was used.
 The recent and duplicate commands read the current `id_records` documents;
 previous-user history is intentionally not retained.
 
-`/clear_ids` is restricted to admins in private chats. It shows `Confirm`
-(success) and `Cancel` (danger) buttons before deleting every document in
-`id_records`. The command does not delete registered groups or saved message
-templates.
+`/clear_ids` is restricted to admins in private chats. It first offers two
+primary options:
+
+- `Clear ID Records` — deletes every document in `id_records` and preserves
+  `processed_messages`
+- `Processed Message IDs` — deletes every document in `processed_messages` and
+  preserves `id_records`
+
+After either option is selected, a separate `Confirm` button is required.
+`Cancel` returns to the control panel. Neither option deletes registered
+groups or saved message templates.
 
 ## Admin control panel
 
@@ -131,6 +139,7 @@ The panel includes:
 - `Welcome Message` — replace the private `/start` welcome message
 - `Duplicate Warning` — replace the duplicate warning template
 - `Control Panel Message` — replace the control panel heading and instructions
+- `Clear IDs` — open the two-option data-clearing flow
 - `Broadcast All` — preview and send a message to all registered groups
 - `Broadcast Single` — preview and send to one registered group
 
