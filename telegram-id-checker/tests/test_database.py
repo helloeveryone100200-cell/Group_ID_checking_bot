@@ -144,3 +144,26 @@ def test_group_registry_and_control_panel_queries(repository: IDRepository) -> N
         "current_users": 2,
         "groups": 2,
     }
+
+
+def test_message_templates_round_trip(repository: IDRepository) -> None:
+    entities = [
+        {
+            "type": "custom_emoji",
+            "offset": 0,
+            "length": 2,
+            "custom_emoji_id": "animated-emoji-id",
+        }
+    ]
+
+    repository.save_message_template(
+        "welcome",
+        "🎉 Welcome",
+        entities,
+    )
+
+    assert repository.get_message_template("welcome") == {
+        "key": "welcome",
+        "text": "🎉 Welcome",
+        "entities": entities,
+    }

@@ -56,6 +56,7 @@ class IDRepository:
         self.database = self.client[database_name]
         self.id_records = self.database["id_records"]
         self.group_records = self.database["group_records"]
+        self.message_templates = self.database["message_templates"]
 
     def connect(self) -> None:
         self.client.admin.command("ping")
@@ -77,6 +78,11 @@ class IDRepository:
         self.group_records.create_index(
             [("last_seen", DESCENDING)],
             name="last_seen_desc",
+        )
+        self.message_templates.create_index(
+            [("key", ASCENDING)],
+            unique=True,
+            name="message_template_key_unique",
         )
         LOGGER.info("MongoDB connection established and indexes are ready")
 
@@ -107,6 +113,30 @@ class IDRepository:
 
     def find_group(self, chat_id: str) -> dict[str, Any] | None:
         return self.group_records.find_one({"chat_id": chat_id}, {"_id": 0})
+
+    def get_message_template(self, key: str) -> dict[str, Any] | None:
+        return self.message_templates.find_one(
+            {"key": key},
+            {"_id": 0, "key": 1, "text": 1, "entities": 1},
+        )
+
+    def save_message_template(
+        self,
+        key: str,
+        text: str,
+        entities: list[dict[str, Any]],
+    ) -> None:
+        self.message_templates.update_one(
+            {"key": key},
+            {
+                "$set": {
+                    "text": text,
+                    "entities": entities,
+                    "updated_at": utc_now(),
+                }
+            },
+            upsert=True,
+        )
 
     def current_user_list(self, *, limit: int = 100) -> list[dict[str, Any]]:
         pipeline = [

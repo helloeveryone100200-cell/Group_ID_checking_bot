@@ -61,6 +61,8 @@ def test_control_panel_is_only_sent_to_admins() -> None:
         "Status",
         "User Lists",
         "Group Lists",
+        "Welcome Message",
+        "Duplicate Warning",
         "Broadcast All",
         "Broadcast Single",
     ]
@@ -68,6 +70,8 @@ def test_control_panel_is_only_sent_to_admins() -> None:
         "primary",
         "success",
         "success",
+        "primary",
+        "primary",
         "danger",
         "danger",
     ]

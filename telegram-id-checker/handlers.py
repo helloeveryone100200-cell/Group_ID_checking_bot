@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, time, timezone
 from typing import Any
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity, Update
 from telegram.constants import ChatType
 from telegram.ext import ContextTypes
 
@@ -19,6 +20,24 @@ WELCOME_MESSAGE = (
     "👋 မင်္ဂလာပါ။ Telegram ID Duplicate Checker မှ ကြိုဆိုပါတယ်။\n\n"
     "ဒီ bot က group message တွေထဲက ID Numbers တွေကို စောင့်ကြည့်ပြီး "
     "ID တစ်ခုကို ထပ်မံတွေ့ရှိရင် duplicate သတိပေးချက် ပို့ပေးပါတယ်။"
+)
+
+DUPLICATE_WARNING_TEMPLATE = (
+    "⚠️ DUPLICATE ID\n\n"
+    "ID: {id}\n\n"
+    "First Seen:\n"
+    "👤 {first_user}\n"
+    "📅 {first_date}\n\n"
+    "Current:\n"
+    "👤 {current_user}\n"
+    "📅 {current_date}\n\n"
+    "📊 Total occurrences: {occurrence_count}"
+)
+
+WELCOME_MESSAGE_KEY = "welcome"
+DUPLICATE_WARNING_MESSAGE_KEY = "duplicate_warning"
+MESSAGE_PLACEHOLDER_PATTERN = re.compile(
+    r"\{(id|first_user|first_date|current_user|current_date|occurrence_count)\}"
 )
 
 CONTROL_PANEL_MESSAGE = (
@@ -51,6 +70,18 @@ def _control_panel_markup() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    "Welcome Message",
+                    callback_data="panel:message:welcome",
+                    style="primary",
+                ),
+                InlineKeyboardButton(
+                    "Duplicate Warning",
+                    callback_data="panel:message:duplicate",
+                    style="primary",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     "Broadcast All",
                     callback_data="panel:broadcast:all",
                     style="danger",
@@ -73,6 +104,20 @@ def _panel_home_markup() -> InlineKeyboardMarkup:
                     "Control Panel",
                     callback_data="panel:home",
                     style="primary",
+                )
+            ]
+        ]
+    )
+
+
+def _message_edit_cancel_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Cancel",
+                    callback_data="panel:message:cancel",
+                    style="danger",
                 )
             ]
         ]
@@ -109,6 +154,143 @@ def _broadcast_confirm_markup() -> InlineKeyboardMarkup:
                 ),
             ]
         ]
+    )
+
+
+def _message_template(
+    repository: IDRepository,
+    key: str,
+    default_text: str,
+) -> dict[str, Any]:
+    try:
+        saved = repository.get_message_template(key)
+    except Exception:
+        LOGGER.exception("Database error while loading message template: %s", key)
+        return {"text": default_text, "entities": []}
+    if not saved or not isinstance(saved.get("text"), str):
+        return {"text": default_text, "entities": []}
+    entities = saved.get("entities")
+    return {
+        "text": saved["text"],
+        "entities": entities if isinstance(entities, list) else [],
+    }
+
+
+def _message_entities(message: Any) -> list[dict[str, Any]]:
+    serialized: list[dict[str, Any]] = []
+    for entity in getattr(message, "entities", None) or []:
+        raw_entity = entity.to_dict()
+        if raw_entity.get("type") == "text_mention":
+            # The nested User object is not needed for this feature and is not
+            # safe to persist as a MongoDB document field.
+            continue
+        clean_entity = {
+            field: raw_entity[field]
+            for field in (
+                "type",
+                "offset",
+                "length",
+                "url",
+                "language",
+                "custom_emoji_id",
+            )
+            if field in raw_entity
+        }
+        serialized.append(clean_entity)
+    return serialized
+
+
+def _telegram_entities(template: dict[str, Any]) -> list[MessageEntity]:
+    entities: list[MessageEntity] = []
+    for raw_entity in template.get("entities", []):
+        if not isinstance(raw_entity, dict):
+            continue
+        try:
+            entities.append(MessageEntity(**raw_entity))
+        except (TypeError, ValueError):
+            LOGGER.warning("Ignoring invalid saved message entity: %r", raw_entity)
+    return entities
+
+
+def _utf16_length(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
+
+def _render_message_template(
+    text: str,
+    entities: list[dict[str, Any]],
+    values: dict[str, str],
+) -> tuple[str, list[MessageEntity]]:
+    """Replace supported placeholders while preserving Telegram entity offsets."""
+    source_boundaries = [0]
+    for character in text:
+        source_boundaries.append(source_boundaries[-1] + _utf16_length(character))
+
+    output_parts: list[str] = []
+    boundary_map: dict[int, int] = {}
+    output_offset = 0
+    cursor = 0
+
+    def append_literal(start: int, end: int) -> None:
+        nonlocal output_offset
+        boundary_map[source_boundaries[start]] = output_offset
+        for index in range(start, end):
+            character = text[index]
+            output_parts.append(character)
+            output_offset += _utf16_length(character)
+            boundary_map[source_boundaries[index + 1]] = output_offset
+
+    for match in MESSAGE_PLACEHOLDER_PATTERN.finditer(text):
+        append_literal(cursor, match.start())
+        replacement = str(values.get(match.group(1), match.group(0)))
+        replacement_start = output_offset
+        for index in range(match.start(), match.end()):
+            boundary_map[source_boundaries[index]] = replacement_start
+        output_parts.append(replacement)
+        output_offset += _utf16_length(replacement)
+        boundary_map[source_boundaries[match.end()]] = output_offset
+        cursor = match.end()
+
+    append_literal(cursor, len(text))
+    rendered_text = "".join(output_parts)
+
+    rendered_entities: list[MessageEntity] = []
+    for raw_entity in entities:
+        if not isinstance(raw_entity, dict):
+            continue
+        try:
+            source_start = int(raw_entity["offset"])
+            source_end = source_start + int(raw_entity["length"])
+            rendered_start = boundary_map[source_start]
+            rendered_end = boundary_map[source_end]
+            if rendered_end <= rendered_start:
+                continue
+            entity_data = dict(raw_entity)
+            entity_data["offset"] = rendered_start
+            entity_data["length"] = rendered_end - rendered_start
+            rendered_entities.append(MessageEntity(**entity_data))
+        except (KeyError, TypeError, ValueError):
+            LOGGER.warning("Ignoring invalid rendered message entity: %r", raw_entity)
+
+    return rendered_text, rendered_entities
+
+
+def _message_edit_prompt(key: str) -> str:
+    if key == WELCOME_MESSAGE_KEY:
+        return (
+            "WELCOME MESSAGE\n\n"
+            "ပြောင်းလဲလိုသော welcome message ကို ပို့ပါ။ "
+            "စာသားနဲ့ Telegram animated/custom emoji ကို တစ်ခါတည်းထည့်နိုင်ပါတယ်။\n"
+            "Emoji ID ကို ကိုယ်တိုင်ထည့်စရာမလိုပါ။"
+        )
+    return (
+        "DUPLICATE WARNING MESSAGE\n\n"
+        "ပြောင်းလဲလိုသော duplicate warning template ကို ပို့ပါ။ "
+        "စာသားနဲ့ Telegram animated/custom emoji ကို တစ်ခါတည်းထည့်နိုင်ပါတယ်။\n"
+        "Emoji ID ကို ကိုယ်တိုင်ထည့်စရာမလိုပါ။\n\n"
+        "အသုံးပြုနိုင်သော placeholders:\n"
+        "{id}, {first_user}, {first_date}, {current_user}, "
+        "{current_date}, {occurrence_count}"
     )
 
 
@@ -158,7 +340,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = InlineKeyboardMarkup(
         [[InlineKeyboardButton("Add me to your chat!", url=f"https://t.me/{username}?startgroup=true")]]
     )
-    await message.reply_text(WELCOME_MESSAGE, reply_markup=keyboard)
+    repository: IDRepository = context.application.bot_data["repository"]
+    welcome_template = _message_template(
+        repository,
+        WELCOME_MESSAGE_KEY,
+        WELCOME_MESSAGE,
+    )
+    await message.reply_text(
+        welcome_template["text"],
+        entities=_telegram_entities(welcome_template),
+        reply_markup=keyboard,
+    )
     if (
         update.effective_chat is not None
         and update.effective_chat.type == ChatType.PRIVATE
@@ -329,11 +521,40 @@ async def _send_broadcast(
 
 
 async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Collect the next private text after an admin chooses a broadcast action."""
+    """Collect the next private text for message settings or a broadcast."""
     if not await _is_panel_admin(update, context):
         return
     message = update.effective_message
     if message is None or not message.text:
+        return
+
+    message_key = context.user_data.pop("message_edit_mode", None)
+    if message_key in {WELCOME_MESSAGE_KEY, DUPLICATE_WARNING_MESSAGE_KEY}:
+        repository: IDRepository = context.application.bot_data["repository"]
+        try:
+            repository.save_message_template(
+                message_key,
+                message.text,
+                _message_entities(message),
+            )
+        except Exception:
+            context.user_data["message_edit_mode"] = message_key
+            LOGGER.exception("Database error while saving message template")
+            await message.reply_text(
+                "Unable to save this message right now.",
+                reply_markup=_message_edit_cancel_markup(),
+            )
+            return
+
+        label = (
+            "Welcome Message"
+            if message_key == WELCOME_MESSAGE_KEY
+            else "Duplicate Warning"
+        )
+        await message.reply_text(
+            f"{label} updated successfully.",
+            reply_markup=_control_panel_markup(),
+        )
         return
 
     mode = context.user_data.pop("broadcast_mode", None)
@@ -431,7 +652,32 @@ async def handle_panel_callback(
             reply_markup=_panel_home_markup(),
         )
         return
+    if data in {
+        "panel:message:welcome",
+        "panel:message:duplicate",
+    }:
+        context.user_data.pop("broadcast_mode", None)
+        context.user_data.pop("pending_broadcast", None)
+        message_key = (
+            WELCOME_MESSAGE_KEY
+            if data == "panel:message:welcome"
+            else DUPLICATE_WARNING_MESSAGE_KEY
+        )
+        context.user_data["message_edit_mode"] = message_key
+        await query.edit_message_text(
+            _message_edit_prompt(message_key),
+            reply_markup=_message_edit_cancel_markup(),
+        )
+        return
+    if data == "panel:message:cancel":
+        context.user_data.pop("message_edit_mode", None)
+        await query.edit_message_text(
+            CONTROL_PANEL_MESSAGE,
+            reply_markup=_control_panel_markup(),
+        )
+        return
     if data == "panel:broadcast:all":
+        context.user_data.pop("message_edit_mode", None)
         context.user_data.pop("pending_broadcast", None)
         context.user_data["broadcast_mode"] = "all"
         await query.edit_message_text(
@@ -441,6 +687,7 @@ async def handle_panel_callback(
         )
         return
     if data == "panel:broadcast:single":
+        context.user_data.pop("message_edit_mode", None)
         context.user_data.pop("pending_broadcast", None)
         context.user_data["broadcast_mode"] = "single"
         await query.edit_message_text(
@@ -451,6 +698,7 @@ async def handle_panel_callback(
         )
         return
     if data == "panel:broadcast:cancel":
+        context.user_data.pop("message_edit_mode", None)
         context.user_data.pop("broadcast_mode", None)
         context.user_data.pop("pending_broadcast", None)
         await query.edit_message_text(
@@ -534,21 +782,26 @@ async def handle_group_message(
         LOGGER.info("New ID detected in chat_id=%s", chat.id)
         return
 
-    current_actor = _actor(username, display_name, user_id)
     previous = result.previous_record or {}
-    warning = (
-        "⚠️ DUPLICATE ID\n\n"
-        f"ID: {parsed.value}\n\n"
-        "First Seen:\n"
-        f"👤 {previous.get('user', 'unknown')}\n"
-        f"📅 {_format_timestamp(previous.get('date'))}\n\n"
-        "Current:\n"
-        f"👤 {current_actor}\n"
-        f"📅 {_format_timestamp(metadata.timestamp)}\n\n"
-        f"📊 Total occurrences: {result.record.get('occurrence_count', 2)}"
+    warning_template = _message_template(
+        repository,
+        DUPLICATE_WARNING_MESSAGE_KEY,
+        DUPLICATE_WARNING_TEMPLATE,
+    )
+    warning, warning_entities = _render_message_template(
+        warning_template["text"],
+        warning_template["entities"],
+        {
+            "id": parsed.value,
+            "first_user": str(previous.get("user", "unknown")),
+            "first_date": _format_timestamp(previous.get("date")),
+            "current_user": _actor(username, display_name, user_id),
+            "current_date": _format_timestamp(metadata.timestamp),
+            "occurrence_count": str(result.record.get("occurrence_count", 2)),
+        },
     )
     try:
-        await message.reply_text(warning)
+        await message.reply_text(warning, entities=warning_entities)
         LOGGER.info("Duplicate detected in chat_id=%s", chat.id)
     except Exception:
         LOGGER.exception("Telegram error while sending duplicate warning")
