@@ -799,6 +799,14 @@ async def handle_group_message(
     }:
         return
 
+    if message.from_user is not None and message.from_user.is_bot:
+        LOGGER.info(
+            "Ignoring bot-authored group message chat_id=%s message_id=%s",
+            chat.id,
+            message.message_id,
+        )
+        return
+
     repository: IDRepository = context.application.bot_data["repository"]
     timestamp = utc_now()
     try:
@@ -824,11 +832,34 @@ async def handle_group_message(
 
     user_id, username, display_name = _user_details(update)
     chat_id, chat_title = _chat_details(update)
+    message_id = _message_id(update)
+    try:
+        claimed = repository.claim_group_message(chat_id, message_id)
+    except Exception:
+        LOGGER.exception(
+            "Database error while claiming group message "
+            "update_id=%s chat_id=%s message_id=%s",
+            update.update_id,
+            chat_id,
+            message_id,
+        )
+        return
+    if not claimed:
+        LOGGER.warning(
+            "Ignoring already processed group message "
+            "update_id=%s chat_id=%s message_id=%s id=%s",
+            update.update_id,
+            chat_id,
+            message_id,
+            parsed.value,
+        )
+        return
+
     metadata = OccurrenceMetadata(
         id=parsed.value,
         chat_id=chat_id,
         chat_title=chat_title,
-        message_id=_message_id(update),
+        message_id=message_id,
         user_id=user_id,
         username=username,
         display_name=display_name,
@@ -837,6 +868,15 @@ async def handle_group_message(
     try:
         result = repository.record_occurrence(metadata)
     except Exception:
+        try:
+            repository.release_group_message(chat_id, message_id)
+        except Exception:
+            LOGGER.exception(
+                "Database error while releasing group message claim "
+                "chat_id=%s message_id=%s",
+                chat_id,
+                message_id,
+            )
         LOGGER.exception("Database error while recording an ID")
         return
 

@@ -81,7 +81,10 @@ The bot creates a unique MongoDB index on `id_records.id` at startup. Each ID
 has exactly one `id_records` document containing only `id`, `user`,
 `date`, and `occurrence_count`. Duplicate checks atomically increment the
 existing record and replace its current user/date; no occurrence-history
-documents are created.
+documents are created. Group messages that contain an ID are also claimed in
+the separate `processed_messages` collection using a unique
+`(chat_id, message_id)` index. This prevents a redelivered Telegram update
+from incrementing an ID twice.
 
 Run the tests:
 

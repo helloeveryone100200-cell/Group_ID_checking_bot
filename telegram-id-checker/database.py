@@ -57,6 +57,7 @@ class IDRepository:
         self.id_records = self.database["id_records"]
         self.group_records = self.database["group_records"]
         self.message_templates = self.database["message_templates"]
+        self.processed_messages = self.database["processed_messages"]
 
     def connect(self) -> None:
         self.client.admin.command("ping")
@@ -84,6 +85,11 @@ class IDRepository:
             unique=True,
             name="message_template_key_unique",
         )
+        self.processed_messages.create_index(
+            [("chat_id", ASCENDING), ("message_id", ASCENDING)],
+            unique=True,
+            name="processed_group_message_unique",
+        )
         LOGGER.info("MongoDB connection established and indexes are ready")
 
     def close(self) -> None:
@@ -100,6 +106,29 @@ class IDRepository:
                 }
             },
             upsert=True,
+        )
+
+    def claim_group_message(self, chat_id: str, message_id: str) -> bool:
+        """Claim one group message so redelivered updates are processed once."""
+        try:
+            self.processed_messages.insert_one(
+                {
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "processed_at": utc_now(),
+                }
+            )
+        except DuplicateKeyError:
+            return False
+        return True
+
+    def release_group_message(self, chat_id: str, message_id: str) -> None:
+        """Release a claim when ID processing fails before it is recorded."""
+        self.processed_messages.delete_one(
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+            }
         )
 
     def list_groups(self, *, limit: int | None = 100) -> list[dict[str, Any]]:

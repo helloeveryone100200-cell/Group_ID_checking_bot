@@ -146,6 +146,20 @@ def test_group_registry_and_control_panel_queries(repository: IDRepository) -> N
     }
 
 
+def test_group_message_can_be_claimed_only_once(repository: IDRepository) -> None:
+    assert repository.claim_group_message("-1001", "message-1") is True
+    assert repository.claim_group_message("-1001", "message-1") is False
+    assert repository.claim_group_message("-1002", "message-1") is True
+    assert repository.processed_messages.count_documents({}) == 2
+
+
+def test_failed_group_message_processing_can_be_retried(repository: IDRepository) -> None:
+    repository.claim_group_message("-1001", "message-1")
+    repository.release_group_message("-1001", "message-1")
+
+    assert repository.claim_group_message("-1001", "message-1") is True
+
+
 def test_message_templates_round_trip(repository: IDRepository) -> None:
     entities = [
         {
