@@ -110,3 +110,37 @@ def test_legacy_record_is_reduced_to_the_current_schema(repository: IDRepository
     assert record["user"] == "@old_user"
     assert record["date"] == first_seen.replace(tzinfo=None)
     assert record["occurrence_count"] == 4
+
+
+def test_group_registry_and_control_panel_queries(repository: IDRepository) -> None:
+    first_date = datetime(2026, 9, 12, tzinfo=timezone.utc)
+    second_date = datetime(2026, 9, 13, tzinfo=timezone.utc)
+    repository.record_group("-1001", "First Group", first_date)
+    repository.record_group("-1002", "Second Group", first_date)
+    repository.record_group("-1001", "Renamed Group", second_date)
+
+    repository.record_occurrence(
+        _metadata("id-1", "1", username="userA", timestamp=first_date)
+    )
+    repository.record_occurrence(
+        _metadata("id-2", "2", username="userA", timestamp=second_date)
+    )
+    repository.record_occurrence(
+        _metadata("id-3", "3", username="userB", timestamp=second_date)
+    )
+
+    groups = repository.list_groups()
+    users = repository.current_user_list()
+    status = repository.control_status()
+
+    assert groups[0]["chat_id"] == "-1001"
+    assert groups[0]["chat_title"] == "Renamed Group"
+    assert set(groups[0]) == {"chat_id", "chat_title", "last_seen"}
+    assert repository.find_group("-1002")["chat_title"] == "Second Group"
+    assert users[0] == {"user": "@userA", "id_count": 2}
+    assert status == {
+        "unique_ids": 3,
+        "duplicate_occurrences": 0,
+        "current_users": 2,
+        "groups": 2,
+    }

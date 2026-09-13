@@ -55,6 +55,7 @@ class IDRepository:
         )
         self.database = self.client[database_name]
         self.id_records = self.database["id_records"]
+        self.group_records = self.database["group_records"]
 
     def connect(self) -> None:
         self.client.admin.command("ping")
@@ -68,10 +69,61 @@ class IDRepository:
             [("date", DESCENDING)],
             name="date_desc",
         )
+        self.group_records.create_index(
+            [("chat_id", ASCENDING)],
+            unique=True,
+            name="chat_id_unique",
+        )
+        self.group_records.create_index(
+            [("last_seen", DESCENDING)],
+            name="last_seen_desc",
+        )
         LOGGER.info("MongoDB connection established and indexes are ready")
 
     def close(self) -> None:
         self.client.close()
+
+    def record_group(self, chat_id: str, chat_title: str, timestamp: datetime) -> None:
+        """Register the latest group that delivered a message to the bot."""
+        self.group_records.update_one(
+            {"chat_id": chat_id},
+            {
+                "$set": {
+                    "chat_title": chat_title,
+                    "last_seen": timestamp,
+                }
+            },
+            upsert=True,
+        )
+
+    def list_groups(self, *, limit: int | None = 100) -> list[dict[str, Any]]:
+        cursor = self.group_records.find(
+            {},
+            {"_id": 0, "chat_id": 1, "chat_title": 1, "last_seen": 1},
+        ).sort("last_seen", DESCENDING)
+        if limit is not None:
+            cursor = cursor.limit(limit)
+        return list(cursor)
+
+    def find_group(self, chat_id: str) -> dict[str, Any] | None:
+        return self.group_records.find_one({"chat_id": chat_id}, {"_id": 0})
+
+    def current_user_list(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        pipeline = [
+            {"$group": {"_id": "$user", "id_count": {"$sum": 1}}},
+            {"$sort": {"id_count": -1, "_id": 1}},
+            {"$limit": limit},
+            {"$project": {"_id": 0, "user": "$_id", "id_count": 1}},
+        ]
+        return list(self.id_records.aggregate(pipeline))
+
+    def control_status(self) -> dict[str, int]:
+        return {
+            "unique_ids": self.id_records.count_documents({}),
+            "duplicate_occurrences": self._duplicate_occurrence_total(),
+            "current_users": len(self.id_records.distinct("user")),
+            "groups": self.group_records.count_documents({}),
+        }
 
     def _migrate_legacy_records(self) -> None:
         """Keep existing records while reducing them to the current schema."""
@@ -180,10 +232,6 @@ class IDRepository:
 
     def stats(self, start_of_day: datetime) -> dict[str, int]:
         today_query = {"date": {"$gte": start_of_day}}
-        duplicate_total = sum(
-            max(int(record.get("occurrence_count", 1)) - 1, 0)
-            for record in self.id_records.find({}, {"occurrence_count": 1})
-        )
         return {
             "new_today": self.id_records.count_documents(
                 {**today_query, "occurrence_count": 1}
@@ -192,8 +240,14 @@ class IDRepository:
                 {**today_query, "occurrence_count": {"$gt": 1}}
             ),
             "unique_ids": self.id_records.count_documents({}),
-            "duplicate_occurrences": duplicate_total,
+            "duplicate_occurrences": self._duplicate_occurrence_total(),
         }
+
+    def _duplicate_occurrence_total(self) -> int:
+        return sum(
+            max(int(record.get("occurrence_count", 1)) - 1, 0)
+            for record in self.id_records.find({}, {"occurrence_count": 1})
+        )
 
     def recent_occurrences(
         self,

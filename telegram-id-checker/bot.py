@@ -7,18 +7,31 @@ import sys
 from datetime import datetime, timezone
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
 
 from config import ConfigError, Settings
 from database import IDRepository
 from handlers import (
+    broadcast,
     check_id,
+    control_panel,
     duplicates,
+    grouplists,
     handle_error,
+    handle_admin_text,
     handle_group_message,
+    handle_panel_callback,
     recent,
     start,
     stats,
+    status,
+    userlists,
 )
 from health_server import HealthServer
 
@@ -74,10 +87,24 @@ def main() -> None:
     application.bot_data["admin_ids"] = settings.admin_ids
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("panel", control_panel))
+    application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("userlists", userlists))
+    application.add_handler(CommandHandler("grouplists", grouplists))
+    application.add_handler(CommandHandler("broadcast", broadcast))
     application.add_handler(CommandHandler("checkid", check_id))
     application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("recent", recent))
     application.add_handler(CommandHandler("duplicates", duplicates))
+    application.add_handler(
+        CallbackQueryHandler(handle_panel_callback, pattern=r"^panel:")
+    )
+    application.add_handler(
+        MessageHandler(
+            filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND,
+            handle_admin_text,
+        )
+    )
     application.add_handler(
         MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, handle_group_message)
     )

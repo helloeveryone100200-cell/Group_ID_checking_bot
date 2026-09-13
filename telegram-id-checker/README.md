@@ -77,8 +77,8 @@ OCR.
 python bot.py
 ```
 
-The bot creates a unique MongoDB index on `id_records.id` at startup. The
-Each ID has exactly one `id_records` document containing only `id`, `user`,
+The bot creates a unique MongoDB index on `id_records.id` at startup. Each ID
+has exactly one `id_records` document containing only `id`, `user`,
 `date`, and `occurrence_count`. Duplicate checks atomically increment the
 existing record and replace its current user/date; no occurrence-history
 documents are created.
@@ -98,10 +98,35 @@ Only Telegram user IDs listed in `ADMIN_IDS` can use these commands:
 - `/stats` — current-date record counts plus all-time totals
 - `/recent` — recently updated ID records
 - `/duplicates` — recently updated records with multiple occurrences
+- `/panel` — open the private admin control panel
+- `/status` — show bot and database status
+- `/userlists` — show users attached to current ID records
+- `/grouplists` — show registered groups
+- `/broadcast` — open broadcast options
 
 The bot never stores an ID because `/checkid` was used.
 The recent and duplicate commands read the current `id_records` documents;
 previous-user history is intentionally not retained.
+
+## Admin control panel
+
+Only users listed in `ADMIN_IDS` can open the control panel, and it works only
+in their private chat with the bot. `/start` also opens the panel for these
+users.
+
+The panel includes:
+
+- `🔵 Status` — bot, ID, user, and registered-group counts
+- `🟢 User Lists` — current users and their current ID counts
+- `🟢 Group Lists` — groups that have delivered messages to the bot
+- `🔴 Broadcast All` — preview and send a message to all registered groups
+- `🔴 Broadcast Single` — preview and send to one registered group
+
+Telegram does not provide custom button colors through the Bot API, so the
+panel uses blue/green/red emoji markers for primary, success, and danger
+actions. Group registry data is stored separately in `group_records` with only
+`chat_id`, `chat_title`, and `last_seen`; it does not add fields to
+`id_records`.
 
 ## Render deployment
 
