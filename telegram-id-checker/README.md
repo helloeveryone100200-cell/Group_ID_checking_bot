@@ -78,9 +78,10 @@ python bot.py
 ```
 
 The bot creates a unique MongoDB index on `id_records.id` at startup. The
-primary record is created atomically; simultaneous submissions cannot create
-two primary records. Every occurrence is also recorded in `id_occurrences` so
-statistics and recent lists can be calculated.
+Each ID has exactly one `id_records` document containing only `id`, `user`,
+`date`, and `occurrence_count`. Duplicate checks atomically increment the
+existing record and replace its current user/date; no occurrence-history
+documents are created.
 
 Run the tests:
 
@@ -94,11 +95,13 @@ Only Telegram user IDs listed in `ADMIN_IDS` can use these commands:
 
 - `/start` — show the welcome message and an “Add me to your chat!” button
 - `/checkid 12345` — read-only lookup
-- `/stats` — today's new IDs and duplicates plus all-time totals
-- `/recent` — recently detected IDs
-- `/duplicates` — recent duplicate occurrences
+- `/stats` — current-date record counts plus all-time totals
+- `/recent` — recently updated ID records
+- `/duplicates` — recently updated records with multiple occurrences
 
 The bot never stores an ID because `/checkid` was used.
+The recent and duplicate commands read the current `id_records` documents;
+previous-user history is intentionally not retained.
 
 ## Render deployment
 

@@ -1,4 +1,4 @@
-"""MongoDB persistence with a global unique ID record and occurrence history."""
+"""MongoDB persistence with one current record per globally unique ID."""
 
 from __future__ import annotations
 
@@ -31,10 +31,11 @@ class OccurrenceMetadata:
 class RecordResult:
     is_new: bool
     record: dict[str, Any]
+    previous_record: dict[str, Any] | None = None
 
 
 class IDRepository:
-    """Repository for globally unique IDs and their occurrences."""
+    """Repository for globally unique IDs and their current state."""
 
     def __init__(
         self,
@@ -54,96 +55,144 @@ class IDRepository:
         )
         self.database = self.client[database_name]
         self.id_records = self.database["id_records"]
-        self.id_occurrences = self.database["id_occurrences"]
 
     def connect(self) -> None:
         self.client.admin.command("ping")
+        self._migrate_legacy_records()
         self.id_records.create_index(
             [("id", ASCENDING)],
             unique=True,
             name="id_unique",
         )
-        self.id_occurrences.create_index([("timestamp", DESCENDING)])
-        self.id_occurrences.create_index(
-            [("id", ASCENDING), ("timestamp", DESCENDING)]
+        self.id_records.create_index(
+            [("date", DESCENDING)],
+            name="date_desc",
         )
         LOGGER.info("MongoDB connection established and indexes are ready")
 
     def close(self) -> None:
         self.client.close()
 
+    def _migrate_legacy_records(self) -> None:
+        """Keep existing records while reducing them to the current schema."""
+        allowed_fields = {"_id", "id", "user", "date", "occurrence_count"}
+        migrated = 0
+        for record in self.id_records.find({}):
+            if (
+                set(record).issubset(allowed_fields)
+                and {"id", "user", "date", "occurrence_count"}.issubset(record)
+            ):
+                continue
+
+            username = record.get("user") or record.get("first_username") or record.get("username")
+            if username:
+                user = str(username)
+                if not user.startswith("@"):
+                    user = f"@{user}"
+            else:
+                user = str(
+                    record.get("first_display_name")
+                    or record.get("display_name")
+                    or record.get("first_user_id")
+                    or record.get("user_id")
+                    or "unknown"
+                )
+
+            date = (
+                record.get("date")
+                or record.get("first_seen")
+                or record.get("timestamp")
+                or utc_now()
+            )
+            try:
+                occurrence_count = max(int(record.get("occurrence_count", 1)), 1)
+            except (TypeError, ValueError):
+                occurrence_count = 1
+
+            clean_record = {
+                "_id": record["_id"],
+                "id": str(record["id"]),
+                "user": user,
+                "date": date,
+                "occurrence_count": occurrence_count,
+            }
+            self.id_records.replace_one({"_id": record["_id"]}, clean_record)
+            migrated += 1
+
+        if migrated:
+            LOGGER.info("Migrated %s ID records to the current schema", migrated)
+
+    @staticmethod
+    def _user_from_metadata(metadata: OccurrenceMetadata) -> str:
+        if metadata.username:
+            return f"@{metadata.username.lstrip('@')}"
+        return metadata.display_name or metadata.user_id
+
     @staticmethod
     def _record_from_metadata(metadata: OccurrenceMetadata) -> dict[str, Any]:
         return {
             "id": metadata.id,
-            "first_seen": metadata.timestamp,
-            "first_chat_id": metadata.chat_id,
-            "first_chat_title": metadata.chat_title,
-            "first_message_id": metadata.message_id,
-            "first_user_id": metadata.user_id,
-            "first_username": metadata.username,
-            "first_display_name": metadata.display_name,
+            "user": IDRepository._user_from_metadata(metadata),
+            "date": metadata.timestamp,
             "occurrence_count": 1,
         }
 
-    @staticmethod
-    def _occurrence_from_metadata(
-        metadata: OccurrenceMetadata,
-        *,
-        is_duplicate: bool,
-    ) -> dict[str, Any]:
-        return {
-            "id": metadata.id,
-            "chat_id": metadata.chat_id,
-            "chat_title": metadata.chat_title,
-            "message_id": metadata.message_id,
-            "user_id": metadata.user_id,
-            "username": metadata.username,
-            "display_name": metadata.display_name,
-            "timestamp": metadata.timestamp,
-            "is_duplicate": is_duplicate,
-        }
-
     def record_occurrence(self, metadata: OccurrenceMetadata) -> RecordResult:
-        """Atomically create the primary record or increment its count."""
+        """Create a record or atomically replace its current user and date."""
         primary = self._record_from_metadata(metadata)
         try:
             self.id_records.insert_one(primary)
         except DuplicateKeyError:
-            record = self.id_records.find_one_and_update(
+            previous = self.id_records.find_one_and_update(
                 {"id": metadata.id},
-                {"$inc": {"occurrence_count": 1}},
-                return_document=ReturnDocument.AFTER,
+                {
+                    "$set": {
+                        "user": primary["user"],
+                        "date": primary["date"],
+                    },
+                    "$inc": {"occurrence_count": 1},
+                },
+                projection={"_id": 0},
+                return_document=ReturnDocument.BEFORE,
             )
-            if record is None:
+            if previous is None:
                 # A transient race with a manually removed record is safest to
                 # surface to the caller rather than treating it as a new ID.
                 raise RuntimeError("ID record disappeared during duplicate update")
-            self.id_occurrences.insert_one(
-                self._occurrence_from_metadata(metadata, is_duplicate=True)
+            occurrence_count = int(previous.get("occurrence_count", 1)) + 1
+            updated = {
+                "id": metadata.id,
+                "user": primary["user"],
+                "date": primary["date"],
+                "occurrence_count": occurrence_count,
+            }
+            previous["occurrence_count"] = int(previous.get("occurrence_count", 1))
+            return RecordResult(
+                is_new=False,
+                record=updated,
+                previous_record=previous,
             )
-            return RecordResult(is_new=False, record=record)
 
-        self.id_occurrences.insert_one(
-            self._occurrence_from_metadata(metadata, is_duplicate=False)
-        )
         return RecordResult(is_new=True, record=primary)
 
     def find_by_id(self, value: str) -> dict[str, Any] | None:
         return self.id_records.find_one({"id": value}, {"_id": 0})
 
     def stats(self, start_of_day: datetime) -> dict[str, int]:
+        today_query = {"date": {"$gte": start_of_day}}
+        duplicate_total = sum(
+            max(int(record.get("occurrence_count", 1)) - 1, 0)
+            for record in self.id_records.find({}, {"occurrence_count": 1})
+        )
         return {
-            "new_today": self.id_occurrences.count_documents(
-                {"timestamp": {"$gte": start_of_day}, "is_duplicate": False}
+            "new_today": self.id_records.count_documents(
+                {**today_query, "occurrence_count": 1}
             ),
-            "duplicates_today": self.id_occurrences.count_documents(
-                {"timestamp": {"$gte": start_of_day}, "is_duplicate": True}
+            "duplicates_today": self.id_records.count_documents(
+                {**today_query, "occurrence_count": {"$gt": 1}}
             ),
             "unique_ids": self.id_records.count_documents({}),
-            "duplicate_occurrences": self.id_occurrences.count_documents(
-                {"is_duplicate": True}
-            ),
+            "duplicate_occurrences": duplicate_total,
         }
 
     def recent_occurrences(
@@ -152,10 +201,10 @@ class IDRepository:
         duplicates_only: bool = False,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
-        query = {"is_duplicate": True} if duplicates_only else {}
+        query = {"occurrence_count": {"$gt": 1}} if duplicates_only else {}
         return list(
-            self.id_occurrences.find(query, {"_id": 0})
-            .sort("timestamp", DESCENDING)
+            self.id_records.find(query, {"_id": 0})
+            .sort("date", DESCENDING)
             .limit(limit)
         )
 

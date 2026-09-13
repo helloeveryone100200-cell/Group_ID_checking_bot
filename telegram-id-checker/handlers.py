@@ -69,18 +69,11 @@ def _format_timestamp(value: datetime | None) -> str:
 
 
 def _format_record(record: dict[str, Any], *, heading: str, occurrences_label: str) -> str:
-    first_actor = _actor(
-        record.get("first_username"),
-        record.get("first_display_name", ""),
-        str(record.get("first_user_id", "")),
-    )
     return (
         f"{heading}\n"
         f"ID: {record.get('id', '')}\n"
-        f"First Seen:\n"
-        f"👤 {first_actor}\n"
-        f"📍 {record.get('first_chat_title', record.get('first_chat_id', 'unknown'))}\n"
-        f"🕐 {_format_timestamp(record.get('first_seen'))}\n"
+        f"👤 {record.get('user', 'unknown')}\n"
+        f"🕐 {_format_timestamp(record.get('date'))}\n"
         f"{occurrences_label}: {record.get('occurrence_count', 1)}"
     )
 
@@ -140,16 +133,15 @@ async def handle_group_message(
         return
 
     current_actor = _actor(username, display_name, user_id)
+    previous = result.previous_record or {}
     warning = (
         "⚠️ DUPLICATE ID\n"
         f"ID: {parsed.value}\n"
         "First Seen:\n"
-        f"👤 {_actor(result.record.get('first_username'), result.record.get('first_display_name', ''), str(result.record.get('first_user_id', '')))}\n"
-        f"📍 {result.record.get('first_chat_title', result.record.get('first_chat_id', 'unknown'))}\n"
-        f"🕐 {_format_timestamp(result.record.get('first_seen'))}\n"
+        f"👤 {previous.get('user', 'unknown')}\n"
+        f"🕐 {_format_timestamp(previous.get('date'))}\n"
         "Current:\n"
         f"👤 {current_actor}\n"
-        f"📍 {chat_title}\n"
         f"🕐 {_format_timestamp(metadata.timestamp)}\n"
         f"Total occurrences: {result.record.get('occurrence_count', 2)}"
     )
@@ -200,8 +192,8 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.effective_message.reply_text(
         "📊 ID CHECKER\n"
-        f"Today\n🟢 New IDs: {values['new_today']}\n"
-        f"🔴 Duplicates: {values['duplicates_today']}\n\n"
+        f"Today (by current record)\n🟢 New IDs: {values['new_today']}\n"
+        f"🔴 Duplicate IDs: {values['duplicates_today']}\n\n"
         f"All Time\nUnique IDs: {values['unique_ids']:,}\n"
         f"Duplicate Occurrences: {values['duplicate_occurrences']:,}"
     )
@@ -222,8 +214,7 @@ async def recent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     lines = ["🕐 RECENT IDS"]
     for row in rows:
-        actor = _actor(row.get("username"), row.get("display_name", ""), str(row.get("user_id", "")))
-        lines.append(f"{row['id']} — {actor} — {_format_timestamp(row.get('timestamp'))}")
+        lines.append(f"{row['id']} — {row.get('user', 'unknown')} — {_format_timestamp(row.get('date'))}")
     await update.effective_message.reply_text("\n".join(lines))
 
 
@@ -242,8 +233,7 @@ async def duplicates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     lines = ["🔴 RECENT DUPLICATES"]
     for row in rows:
-        actor = _actor(row.get("username"), row.get("display_name", ""), str(row.get("user_id", "")))
-        lines.append(f"{row['id']} — {actor} — {_format_timestamp(row.get('timestamp'))}")
+        lines.append(f"{row['id']} — {row.get('user', 'unknown')} — {_format_timestamp(row.get('date'))}")
     await update.effective_message.reply_text("\n".join(lines))
 
 
