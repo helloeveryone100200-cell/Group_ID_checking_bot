@@ -20,6 +20,7 @@ from database import IDRepository
 from handlers import (
     broadcast,
     check_id,
+    clear_ids,
     control_panel,
     duplicates,
     grouplists,
@@ -92,6 +93,7 @@ def main() -> None:
     application.add_handler(CommandHandler("userlists", userlists))
     application.add_handler(CommandHandler("grouplists", grouplists))
     application.add_handler(CommandHandler("broadcast", broadcast))
+    application.add_handler(CommandHandler("clear_ids", clear_ids))
     application.add_handler(CommandHandler("checkid", check_id))
     application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("recent", recent))

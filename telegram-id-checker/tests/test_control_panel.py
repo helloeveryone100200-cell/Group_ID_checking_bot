@@ -7,7 +7,7 @@ import mongomock
 from telegram.constants import ChatType
 
 from database import IDRepository
-from handlers import _send_broadcast, control_panel
+from handlers import _send_broadcast, clear_ids, control_panel
 
 
 def _context(repository: IDRepository, *, admin_ids: frozenset[int]) -> SimpleNamespace:
@@ -94,3 +94,21 @@ def test_broadcast_all_sends_only_to_registered_groups() -> None:
         call.kwargs["chat_id"] for call in context.bot.send_message.await_args_list
     }
     assert sent_chat_ids == {"-1001", "-1002"}
+
+
+def test_clear_ids_requires_admin_confirmation() -> None:
+    repository = _repository()
+    admin_message = SimpleNamespace(reply_text=AsyncMock())
+
+    asyncio.run(
+        clear_ids(
+            _update(100, admin_message),
+            _context(repository, admin_ids=frozenset({100})),
+        )
+    )
+
+    admin_message.reply_text.assert_awaited_once()
+    markup = admin_message.reply_text.await_args.kwargs["reply_markup"]
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    assert [button.text for button in buttons] == ["Confirm", "Cancel"]
+    assert [button.style for button in buttons] == ["success", "danger"]

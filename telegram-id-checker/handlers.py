@@ -157,6 +157,25 @@ def _broadcast_confirm_markup() -> InlineKeyboardMarkup:
     )
 
 
+def _clear_ids_confirm_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Confirm",
+                    callback_data="panel:clear_ids:confirm",
+                    style="success",
+                ),
+                InlineKeyboardButton(
+                    "Cancel",
+                    callback_data="panel:clear_ids:cancel",
+                    style="danger",
+                ),
+            ]
+        ]
+    )
+
+
 def _message_template(
     repository: IDRepository,
     key: str,
@@ -484,6 +503,20 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def clear_ids(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ask a private admin to confirm deleting all duplicate-check records."""
+    if not await _is_panel_admin(update, context):
+        return
+    context.user_data["clear_ids_pending"] = True
+    await update.effective_message.reply_text(
+        "CLEAR ID RECORDS\n\n"
+        "This will permanently delete all stored duplicate-check IDs from "
+        "MongoDB. Group lists and message templates will not be deleted.\n\n"
+        "Are you sure you want to continue?",
+        reply_markup=_clear_ids_confirm_markup(),
+    )
+
+
 async def _send_broadcast(
     context: ContextTypes.DEFAULT_TYPE,
     *,
@@ -671,6 +704,35 @@ async def handle_panel_callback(
         return
     if data == "panel:message:cancel":
         context.user_data.pop("message_edit_mode", None)
+        await query.edit_message_text(
+            CONTROL_PANEL_MESSAGE,
+            reply_markup=_control_panel_markup(),
+        )
+        return
+    if data == "panel:clear_ids:confirm":
+        if not context.user_data.pop("clear_ids_pending", False):
+            await query.edit_message_text(
+                "No pending clear request found.",
+                reply_markup=_panel_home_markup(),
+            )
+            return
+        try:
+            deleted_count = repository.clear_id_records()
+        except Exception:
+            LOGGER.exception("Database error while clearing ID records")
+            await query.edit_message_text(
+                "Unable to clear ID records right now.",
+                reply_markup=_panel_home_markup(),
+            )
+            return
+        await query.edit_message_text(
+            "ID records cleared successfully.\n"
+            f"Deleted records: {deleted_count:,}",
+            reply_markup=_panel_home_markup(),
+        )
+        return
+    if data == "panel:clear_ids:cancel":
+        context.user_data.pop("clear_ids_pending", None)
         await query.edit_message_text(
             CONTROL_PANEL_MESSAGE,
             reply_markup=_control_panel_markup(),

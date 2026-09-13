@@ -167,3 +167,23 @@ def test_message_templates_round_trip(repository: IDRepository) -> None:
         "text": "🎉 Welcome",
         "entities": entities,
     }
+
+
+def test_clear_id_records_does_not_delete_other_collections(
+    repository: IDRepository,
+) -> None:
+    repository.id_records.insert_one(
+        {
+            "id": "123",
+            "user": "@tester",
+            "date": datetime.now(timezone.utc),
+            "occurrence_count": 2,
+        }
+    )
+    repository.record_group("-1001", "Test Group", datetime.now(timezone.utc))
+    repository.save_message_template("welcome", "Welcome", [])
+
+    assert repository.clear_id_records() == 1
+    assert repository.id_records.count_documents({}) == 0
+    assert repository.find_group("-1001") is not None
+    assert repository.get_message_template("welcome") is not None

@@ -103,10 +103,16 @@ Only Telegram user IDs listed in `ADMIN_IDS` can use these commands:
 - `/userlists` — show users attached to current ID records
 - `/grouplists` — show registered groups
 - `/broadcast` — open broadcast options
+- `/clear_ids` — privately request confirmation before clearing all stored ID records
 
 The bot never stores an ID because `/checkid` was used.
 The recent and duplicate commands read the current `id_records` documents;
 previous-user history is intentionally not retained.
+
+`/clear_ids` is restricted to admins in private chats. It shows `Confirm`
+(success) and `Cancel` (danger) buttons before deleting every document in
+`id_records`. The command does not delete registered groups or saved message
+templates.
 
 ## Admin control panel
 

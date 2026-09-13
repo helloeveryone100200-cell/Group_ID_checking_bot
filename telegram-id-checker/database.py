@@ -260,6 +260,11 @@ class IDRepository:
     def find_by_id(self, value: str) -> dict[str, Any] | None:
         return self.id_records.find_one({"id": value}, {"_id": 0})
 
+    def clear_id_records(self) -> int:
+        """Delete all stored duplicate-check records and return the count."""
+        result = self.id_records.delete_many({})
+        return int(result.deleted_count)
+
     def stats(self, start_of_day: datetime) -> dict[str, int]:
         today_query = {"date": {"$gte": start_of_day}}
         return {
