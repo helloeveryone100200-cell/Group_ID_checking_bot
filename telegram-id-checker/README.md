@@ -92,7 +92,7 @@ pytest -q
 
 Only Telegram user IDs listed in `ADMIN_IDS` can use these commands:
 
-- `/start` — show the welcome message and usage instructions
+- `/start` — show the welcome message and an “Add me to your chat!” button
 - `/checkid 12345` — read-only lookup
 - `/stats` — today's new IDs and duplicates plus all-time totals
 - `/recent` — recently detected IDs

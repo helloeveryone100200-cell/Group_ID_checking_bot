@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, time, timezone
 from typing import Any
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatType
 from telegram.ext import ContextTypes
 
@@ -17,18 +17,8 @@ LOGGER = logging.getLogger(__name__)
 
 WELCOME_MESSAGE = (
     "👋 မင်္ဂလာပါ။ Telegram ID Duplicate Checker မှ ကြိုဆိုပါတယ်။\n\n"
-    "ဒီ bot က group message တွေထဲက standalone ID field တွေကို စောင့်ကြည့်ပြီး "
-    "ID တစ်ခုကို ထပ်မံတွေ့ရှိရင် duplicate သတိပေးချက် ပို့ပေးပါတယ်။\n\n"
-    "စတင်အသုံးပြုရန်\n"
-    "1. ဒီ bot ကို စောင့်ကြည့်လိုတဲ့ group ထဲ ထည့်ပါ။\n"
-    "2. BotFather → Group Privacy → Turn off လုပ်ပါ။\n"
-    "3. Group ထဲမှာ ဥပမာ `ID: 12345` လို့ ပို့ပါ။\n\n"
-    "Admin commands:\n"
-    "/checkid <id> — ID ရှိ/မရှိ စစ်ရန်\n"
-    "/stats — ယနေ့နှင့် စုစုပေါင်းစာရင်းကြည့်ရန်\n"
-    "/recent — မကြာသေးမီက တွေ့ထားသော ID များ\n"
-    "/duplicates — duplicate ဖြစ်ထားသော ID များ\n\n"
-    "Admin commands တွေကို ADMIN_IDS ထဲမှာ သတ်မှတ်ထားတဲ့ admin များသာ အသုံးပြုနိုင်ပါတယ်။"
+    "ဒီ bot က group message တွေထဲက ID Numbers တွေကို စောင့်ကြည့်ပြီး "
+    "ID တစ်ခုကို ထပ်မံတွေ့ရှိရင် duplicate သတိပေးချက် ပို့ပေးပါတယ်။"
 )
 
 
@@ -57,11 +47,17 @@ def _actor(username: str | None, display_name: str, user_id: str) -> str:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send the onboarding message in private chats or groups."""
+    """Send the welcome message and a button for adding the bot to a group."""
     message = update.effective_message
     if message is None:
         return
-    await message.reply_text(WELCOME_MESSAGE)
+    username = context.bot.username
+    if not username:
+        raise RuntimeError("Telegram bot username is unavailable")
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Add me to your chat!", url=f"https://t.me/{username}?startgroup=true")]]
+    )
+    await message.reply_text(WELCOME_MESSAGE, reply_markup=keyboard)
 
 
 def _format_timestamp(value: datetime | None) -> str:
