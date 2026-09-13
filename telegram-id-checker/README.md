@@ -116,16 +116,17 @@ users.
 
 The panel includes:
 
-- `🔵 Status` — bot, ID, user, and registered-group counts
-- `🟢 User Lists` — current users and their current ID counts
-- `🟢 Group Lists` — groups that have delivered messages to the bot
-- `🔴 Broadcast All` — preview and send a message to all registered groups
-- `🔴 Broadcast Single` — preview and send to one registered group
+- `Status` — bot, ID, user, and registered-group counts
+- `User Lists` — current users and their current ID counts
+- `Group Lists` — groups that have delivered messages to the bot
+- `Broadcast All` — preview and send a message to all registered groups
+- `Broadcast Single` — preview and send to one registered group
 
-Telegram does not provide custom button colors through the Bot API, so the
-panel uses blue/green/red emoji markers for primary, success, and danger
-actions. Group registry data is stored separately in `group_records` with only
-`chat_id`, `chat_title`, and `last_seen`; it does not add fields to
+The panel uses Telegram's native inline-button styles: `primary` (blue),
+`success` (green), and `danger` (red). Button labels intentionally do not use
+emoji. Clients released before February 9, 2026 may display these buttons
+without styling. Group registry data is stored separately in `group_records`
+with only `chat_id`, `chat_title`, and `last_seen`; it does not add fields to
 `id_records`.
 
 ## Render deployment

@@ -56,13 +56,20 @@ def test_control_panel_is_only_sent_to_admins() -> None:
     admin_message.reply_text.assert_awaited_once()
     non_admin_message.reply_text.assert_not_awaited()
     markup = admin_message.reply_text.await_args.kwargs["reply_markup"]
-    labels = [button.text for row in markup.inline_keyboard for button in row]
-    assert labels == [
-        "🔵 Status",
-        "🟢 User Lists",
-        "🟢 Group Lists",
-        "🔴 Broadcast All",
-        "🔴 Broadcast Single",
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    assert [button.text for button in buttons] == [
+        "Status",
+        "User Lists",
+        "Group Lists",
+        "Broadcast All",
+        "Broadcast Single",
+    ]
+    assert [button.style for button in buttons] == [
+        "primary",
+        "success",
+        "success",
+        "danger",
+        "danger",
     ]
 
 

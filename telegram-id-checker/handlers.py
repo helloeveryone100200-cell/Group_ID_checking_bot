@@ -30,14 +30,36 @@ CONTROL_PANEL_MESSAGE = (
 def _control_panel_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🔵 Status", callback_data="panel:status")],
             [
-                InlineKeyboardButton("🟢 User Lists", callback_data="panel:userlists"),
-                InlineKeyboardButton("🟢 Group Lists", callback_data="panel:grouplists"),
+                InlineKeyboardButton(
+                    "Status",
+                    callback_data="panel:status",
+                    style="primary",
+                )
             ],
             [
-                InlineKeyboardButton("🔴 Broadcast All", callback_data="panel:broadcast:all"),
-                InlineKeyboardButton("🔴 Broadcast Single", callback_data="panel:broadcast:single"),
+                InlineKeyboardButton(
+                    "User Lists",
+                    callback_data="panel:userlists",
+                    style="success",
+                ),
+                InlineKeyboardButton(
+                    "Group Lists",
+                    callback_data="panel:grouplists",
+                    style="success",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "Broadcast All",
+                    callback_data="panel:broadcast:all",
+                    style="danger",
+                ),
+                InlineKeyboardButton(
+                    "Broadcast Single",
+                    callback_data="panel:broadcast:single",
+                    style="danger",
+                ),
             ],
         ]
     )
@@ -45,13 +67,29 @@ def _control_panel_markup() -> InlineKeyboardMarkup:
 
 def _panel_home_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🔵 Control Panel", callback_data="panel:home")]]
+        [
+            [
+                InlineKeyboardButton(
+                    "Control Panel",
+                    callback_data="panel:home",
+                    style="primary",
+                )
+            ]
+        ]
     )
 
 
 def _broadcast_cancel_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("⚪ Cancel", callback_data="panel:broadcast:cancel")]]
+        [
+            [
+                InlineKeyboardButton(
+                    "Cancel",
+                    callback_data="panel:broadcast:cancel",
+                    style="danger",
+                )
+            ]
+        ]
     )
 
 
@@ -60,12 +98,14 @@ def _broadcast_confirm_markup() -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton(
-                    "🔴 Confirm Broadcast",
+                    "Confirm Broadcast",
                     callback_data="panel:broadcast:confirm",
+                    style="danger",
                 ),
                 InlineKeyboardButton(
-                    "⚪ Cancel",
+                    "Cancel",
                     callback_data="panel:broadcast:cancel",
+                    style="danger",
                 ),
             ]
         ]
