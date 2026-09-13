@@ -63,6 +63,7 @@ def test_control_panel_is_only_sent_to_admins() -> None:
         "Group Lists",
         "Welcome Message",
         "Duplicate Warning",
+        "Control Panel Message",
         "Broadcast All",
         "Broadcast Single",
     ]
@@ -72,9 +73,30 @@ def test_control_panel_is_only_sent_to_admins() -> None:
         "success",
         "primary",
         "primary",
+        "primary",
         "danger",
         "danger",
     ]
+
+
+def test_control_panel_uses_saved_message_template() -> None:
+    repository = _repository()
+    repository.save_message_template(
+        "control_panel",
+        "CUSTOM CONTROL PANEL",
+        [],
+    )
+    admin_message = SimpleNamespace(reply_text=AsyncMock())
+
+    asyncio.run(
+        control_panel(
+            _update(100, admin_message),
+            _context(repository, admin_ids=frozenset({100})),
+        )
+    )
+
+    admin_message.reply_text.assert_awaited_once()
+    assert admin_message.reply_text.await_args.args[0] == "CUSTOM CONTROL PANEL"
 
 
 def test_start_add_to_chat_button_is_primary() -> None:

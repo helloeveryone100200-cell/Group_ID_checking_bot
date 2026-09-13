@@ -36,6 +36,7 @@ DUPLICATE_WARNING_TEMPLATE = (
 
 WELCOME_MESSAGE_KEY = "welcome"
 DUPLICATE_WARNING_MESSAGE_KEY = "duplicate_warning"
+CONTROL_PANEL_MESSAGE_KEY = "control_panel"
 MESSAGE_PLACEHOLDER_PATTERN = re.compile(
     r"\{(id|first_user|first_date|current_user|current_date|occurrence_count)\}"
 )
@@ -79,6 +80,13 @@ def _control_panel_markup() -> InlineKeyboardMarkup:
                     callback_data="panel:message:duplicate",
                     style="primary",
                 ),
+            ],
+            [
+                InlineKeyboardButton(
+                    "Control Panel Message",
+                    callback_data="panel:message:control_panel",
+                    style="primary",
+                )
             ],
             [
                 InlineKeyboardButton(
@@ -195,6 +203,14 @@ def _message_template(
     }
 
 
+def _control_panel_template(repository: IDRepository) -> dict[str, Any]:
+    return _message_template(
+        repository,
+        CONTROL_PANEL_MESSAGE_KEY,
+        CONTROL_PANEL_MESSAGE,
+    )
+
+
 def _message_entities(message: Any) -> list[dict[str, Any]]:
     serialized: list[dict[str, Any]] = []
     for entity in getattr(message, "entities", None) or []:
@@ -302,6 +318,13 @@ def _message_edit_prompt(key: str) -> str:
             "စာသားနဲ့ Telegram animated/custom emoji ကို တစ်ခါတည်းထည့်နိုင်ပါတယ်။\n"
             "Emoji ID ကို ကိုယ်တိုင်ထည့်စရာမလိုပါ။"
         )
+    if key == CONTROL_PANEL_MESSAGE_KEY:
+        return (
+            "CONTROL PANEL MESSAGE\n\n"
+            "ပြောင်းလဲလိုသော control panel message ကို ပို့ပါ။ "
+            "စာသားနဲ့ Telegram animated/custom emoji ကို တစ်ခါတည်းထည့်နိုင်ပါတယ်။\n"
+            "Emoji ID ကို ကိုယ်တိုင်ထည့်စရာမလိုပါ။"
+        )
     return (
         "DUPLICATE WARNING MESSAGE\n\n"
         "ပြောင်းလဲလိုသော duplicate warning template ကို ပို့ပါ။ "
@@ -383,7 +406,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         and update.effective_chat.type == ChatType.PRIVATE
         and await _is_admin(update, context)
     ):
-        await message.reply_text(CONTROL_PANEL_MESSAGE, reply_markup=_control_panel_markup())
+        control_panel_template = _control_panel_template(repository)
+        await message.reply_text(
+            control_panel_template["text"],
+            entities=_telegram_entities(control_panel_template),
+            reply_markup=_control_panel_markup(),
+        )
 
 
 def _format_timestamp(value: datetime | None) -> str:
@@ -460,8 +488,11 @@ async def control_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     message = update.effective_message
     if message is not None:
+        repository: IDRepository = context.application.bot_data["repository"]
+        control_panel_template = _control_panel_template(repository)
         await message.reply_text(
-            CONTROL_PANEL_MESSAGE,
+            control_panel_template["text"],
+            entities=_telegram_entities(control_panel_template),
             reply_markup=_control_panel_markup(),
         )
 
@@ -570,7 +601,11 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     message_key = context.user_data.pop("message_edit_mode", None)
-    if message_key in {WELCOME_MESSAGE_KEY, DUPLICATE_WARNING_MESSAGE_KEY}:
+    if message_key in {
+        WELCOME_MESSAGE_KEY,
+        DUPLICATE_WARNING_MESSAGE_KEY,
+        CONTROL_PANEL_MESSAGE_KEY,
+    }:
         repository: IDRepository = context.application.bot_data["repository"]
         try:
             repository.save_message_template(
@@ -587,11 +622,11 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return
 
-        label = (
-            "Welcome Message"
-            if message_key == WELCOME_MESSAGE_KEY
-            else "Duplicate Warning"
-        )
+        label = {
+            WELCOME_MESSAGE_KEY: "Welcome Message",
+            DUPLICATE_WARNING_MESSAGE_KEY: "Duplicate Warning",
+            CONTROL_PANEL_MESSAGE_KEY: "Control Panel Message",
+        }[message_key]
         await message.reply_text(
             f"{label} updated successfully.",
             reply_markup=_control_panel_markup(),
@@ -670,8 +705,10 @@ async def handle_panel_callback(
     repository: IDRepository = context.application.bot_data["repository"]
 
     if data == "panel:home":
+        control_panel_template = _control_panel_template(repository)
         await query.edit_message_text(
-            CONTROL_PANEL_MESSAGE,
+            control_panel_template["text"],
+            entities=_telegram_entities(control_panel_template),
             reply_markup=_control_panel_markup(),
         )
         return
@@ -696,14 +733,15 @@ async def handle_panel_callback(
     if data in {
         "panel:message:welcome",
         "panel:message:duplicate",
+        "panel:message:control_panel",
     }:
         context.user_data.pop("broadcast_mode", None)
         context.user_data.pop("pending_broadcast", None)
-        message_key = (
-            WELCOME_MESSAGE_KEY
-            if data == "panel:message:welcome"
-            else DUPLICATE_WARNING_MESSAGE_KEY
-        )
+        message_key = {
+            "panel:message:welcome": WELCOME_MESSAGE_KEY,
+            "panel:message:duplicate": DUPLICATE_WARNING_MESSAGE_KEY,
+            "panel:message:control_panel": CONTROL_PANEL_MESSAGE_KEY,
+        }[data]
         context.user_data["message_edit_mode"] = message_key
         await query.edit_message_text(
             _message_edit_prompt(message_key),
@@ -712,8 +750,10 @@ async def handle_panel_callback(
         return
     if data == "panel:message:cancel":
         context.user_data.pop("message_edit_mode", None)
+        control_panel_template = _control_panel_template(repository)
         await query.edit_message_text(
-            CONTROL_PANEL_MESSAGE,
+            control_panel_template["text"],
+            entities=_telegram_entities(control_panel_template),
             reply_markup=_control_panel_markup(),
         )
         return
@@ -741,8 +781,10 @@ async def handle_panel_callback(
         return
     if data == "panel:clear_ids:cancel":
         context.user_data.pop("clear_ids_pending", None)
+        control_panel_template = _control_panel_template(repository)
         await query.edit_message_text(
-            CONTROL_PANEL_MESSAGE,
+            control_panel_template["text"],
+            entities=_telegram_entities(control_panel_template),
             reply_markup=_control_panel_markup(),
         )
         return
@@ -771,8 +813,10 @@ async def handle_panel_callback(
         context.user_data.pop("message_edit_mode", None)
         context.user_data.pop("broadcast_mode", None)
         context.user_data.pop("pending_broadcast", None)
+        control_panel_template = _control_panel_template(repository)
         await query.edit_message_text(
-            CONTROL_PANEL_MESSAGE,
+            control_panel_template["text"],
+            entities=_telegram_entities(control_panel_template),
             reply_markup=_control_panel_markup(),
         )
         return

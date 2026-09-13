@@ -130,6 +130,7 @@ The panel includes:
 - `Group Lists` — groups that have delivered messages to the bot
 - `Welcome Message` — replace the private `/start` welcome message
 - `Duplicate Warning` — replace the duplicate warning template
+- `Control Panel Message` — replace the control panel heading and instructions
 - `Broadcast All` — preview and send a message to all registered groups
 - `Broadcast Single` — preview and send to one registered group
 
@@ -141,9 +142,10 @@ with only `chat_id`, `chat_title`, and `last_seen`; it does not add fields to
 `id_records`.
 
 Admins can send normal text or Telegram custom/animated emoji directly after
-selecting `Welcome Message` or `Duplicate Warning`. The bot stores Telegram
-message entities with the text, so an emoji ID does not need to be entered
-manually. Duplicate warning templates support these placeholders:
+selecting `Welcome Message`, `Duplicate Warning`, or `Control Panel Message`.
+The bot stores Telegram message entities with the text, so an emoji ID does not
+need to be entered manually. Duplicate warning templates support these
+placeholders:
 `{id}`, `{first_user}`, `{first_date}`, `{current_user}`, `{current_date}`,
 and `{occurrence_count}`.
 
