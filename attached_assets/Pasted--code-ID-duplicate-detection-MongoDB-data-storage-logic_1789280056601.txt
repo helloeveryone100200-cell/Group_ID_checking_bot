@@ -1,0 +1,157 @@
+လက်ရှိ code ထဲက ID duplicate detection နဲ့ MongoDB data storage logic ကို အောက်ပါ requirement အတိုင်း ပြင်ပေးပါ။
+အဓိကရည်ရွယ်ချက်
+ID တစ်ခုအတွက် MongoDB ထဲမှာ record တစ်ခုတည်းသာ ရှိရမည်။
+ID တစ်ခုကို user မတူသူများက အကြိမ်ကြိမ်စစ်ဆေးလာလျှင် record အသစ်များ မဖန်တီးရပါ။ ရှိပြီးသား record ကို update/replace လုပ်ရမည်။
+အဓိက logic:
+ID တစ်ခု = MongoDB record တစ်ခု
+MongoDB Storage
+id_records collection ကိုသာ အသုံးပြုပါ။
+ID တစ်ခုအတွက် အောက်ပါ data များသာ သိမ်းပါ။
+{
+  id: "123456789",
+  user: "@currentUser",
+  date: "2026-09-12",
+  occurrence_count: 3
+}
+လိုအပ်ပါက date ကို ISODate အဖြစ် သိမ်းနိုင်သည်။
+မလိုအပ်သော data များကို မသိမ်းပါနှင့်။
+အောက်ပါ data များကို id_records ထဲတွင် မသိမ်းရပါ။
+chat_id
+chat_title
+message_id
+user_id
+username
+display_name
+previous user history
+user history list
+first user history
+duplicate records
+message history
+အဓိကအားဖြင့် ID တစ်ခုအတွက် record တစ်ခုတည်းသာ ရှိရမည်။
+id_occurrences Collection
+လက်ရှိ code တွင် id_occurrences collection ရှိပြီး ID တစ်ခုကို 3 ကြိမ်စစ်လျှင် record 3 ခု သိမ်းနေပါသည်။
+ဒီ behavior ကို မသုံးတော့ပါနှင့်။
+ID တစ်ခုကို အကြိမ်တိုင်း record အသစ်အဖြစ် မသိမ်းရပါ။
+id_occurrences collection မလိုအပ်တော့ပါက duplicate detection အတွက် အသုံးမပြုဘဲ id_records တစ်ခုတည်းကို source of truth အဖြစ် အသုံးပြုပါ။
+First Check
+ID မရှိသေးလျှင် record အသစ် create လုပ်ပါ။
+ဥပမာ User A က ပထမဆုံးစစ်လျှင်:
+ID: 123456789
+User: @userA
+Date: 2026-09-12
+Total Occurrences: 1
+Database:
+{
+  id: "123456789",
+  user: "@userA",
+  date: "2026-09-12",
+  occurrence_count: 1
+}
+ပထမဆုံးအကြိမ်ဖြစ်သောကြောင့် Duplicate Message မပြပါနှင့်။
+Second Check
+User B က ID 123456789 ကို ထပ်စစ်လျှင် database ထဲမှာ User A ရှိနေမည်။
+Update မလုပ်ခင် database ထဲက လက်ရှိ User A ကို အရင်ဖတ်ယူပါ။
+ထို့နောက် အောက်ပါ Duplicate Message ကို ပြပါ။
+⚠️ DUPLICATE ID
+
+ID: 123456789
+
+First Seen:
+👤 @userA
+🕐 2026-09-12
+
+Current:
+👤 @userB
+🕐 2026-09-12
+
+Total occurrences: 2
+Message ပြပြီးနောက် database ကို User B ဖြင့် update/replace လုပ်ပါ။
+Database:
+{
+  id: "123456789",
+  user: "@userB",
+  date: "2026-09-12",
+  occurrence_count: 2
+}
+User A ကို database ထဲမှာ ဆက်လက်မသိမ်းပါနှင့်။
+Third Check
+User C က ထပ်စစ်လျှင် database ထဲမှာ User B ရှိနေမည်။
+User B ကို database မှ အရင်ဖတ်ပြီး Duplicate Message တွင် First Seen အဖြစ် ပြပါ။
+⚠️ DUPLICATE ID
+
+ID: 123456789
+
+First Seen:
+👤 @userB
+🕐 2026-09-12
+
+Current:
+👤 @userC
+🕐 2026-09-12
+
+Total occurrences: 3
+ပြီးနောက် database ကို User C ဖြင့် update လုပ်ပါ။
+{
+  id: "123456789",
+  user: "@userC",
+  date: "2026-09-12",
+  occurrence_count: 3
+}
+ဆက်လက်လုပ်ဆောင်ပုံ
+User A → B → C → D → E
+ဖြစ်လျှင်:
+A → occurrence 1
+B → occurrence 2
+C → occurrence 3
+D → occurrence 4
+E → occurrence 5
+Database ထဲမှာ နောက်ဆုံးအခြေအနေဖြစ်သော E တစ်ယောက်ပဲ ရှိရမည်။
+{
+  id: "123456789",
+  user: "@userE",
+  date: "2026-09-12",
+  occurrence_count: 5
+}
+A, B, C, D တို့၏ history ကို database ထဲတွင် မသိမ်းရပါ။
+Same User ဖြစ်လည်း Duplicate ဖြစ်ရမည်
+User တစ်ယောက်တည်းက ID တစ်ခုကို ထပ်မံစစ်ဆေးလာလျှင်လည်း Duplicate Message ပြပါ။
+User တူ/မတူကို မခွဲခြားပါနှင့်။
+ဥပမာ:
+First check:
+@userA → count 1
+
+Second check:
+@userA → count 2
+ဒုတိယအကြိမ်တွင်လည်း:
+⚠️ DUPLICATE ID
+ပြရမည်။
+ID Index
+id field ကို unique index ထားပါ။
+db.id_records.createIndex(
+  { id: 1 },
+  { unique: true }
+)
+ID ရှာဖွေမှုသည် collection တစ်ခုလုံးကို scan မလုပ်ဘဲ index ကို အသုံးပြုရမည်။
+Important: Atomic Update
+Duplicate detection နှင့် update logic ကို race condition မဖြစ်အောင် database operation ကို atomic ဖြစ်နိုင်သမျှ ပြုလုပ်ပါ။
+အထူးသဖြင့် တစ်ချိန်တည်းမှာ ID တစ်ခုကို request နှစ်ခုဝင်လာလျှင် occurrence count မမှားစေရန် သေချာစီမံပါ။
+လိုအပ်ပါက findOneAndUpdate, $inc, $set, transaction သို့မဟုတ် သင့်လက်ရှိ MongoDB driver/version နှင့် သင့်တော်သော atomic operation ကို အသုံးပြုပါ။
+အရေးကြီးသော Constraints
+မလိုအပ်သော feature မထည့်ပါနှင့်။
+မလိုအပ်သော field မသိမ်းပါနှင့်။
+Previous users history မသိမ်းပါနှင့်။
+id_occurrences ထဲသို့ duplicate record အသစ်များ မထည့်ပါနှင့်။
+ID တစ်ခုအတွက် database ထဲတွင် record တစ်ခုထက်ပိုမရှိရပါ။
+အဓိက logic ကို အောက်ပါအတိုင်းသာ ထားပါ။
+ID မရှိ
+→ Create record
+→ count = 1
+→ No duplicate message
+
+ID ရှိ
+→ Existing user ကို အရင်ဖတ်
+→ Duplicate message ပြ
+→ count + 1
+→ Current user/date ဖြင့် existing record ကို update
+နောက်ဆုံးအနေဖြင့် လက်ရှိ code structure/function names များကို မလိုအပ်ဘဲ မပြောင်းပါနှင့်။ ရှိပြီးသား duplicate detection flow ကို အထက်ပါ logic နှင့် ကိုက်ညီအောင်သာ ပြင်ပေးပါ။
+ပြင်ပြီးပါက မည်သည့် file/function/section များကို ပြင်ထားသည်ကိုလည်း တိုတိုရှင်းရှင်း ဖော်ပြပေးပါ။
