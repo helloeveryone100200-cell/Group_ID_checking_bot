@@ -74,6 +74,23 @@ def _control_panel_markup() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    "Check ID",
+                    callback_data="panel:checkid",
+                    style="success",
+                ),
+                InlineKeyboardButton(
+                    "Recent",
+                    callback_data="panel:recent",
+                    style="success",
+                ),
+                InlineKeyboardButton(
+                    "Duplicates",
+                    callback_data="panel:duplicates",
+                    style="success",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     "Welcome Message",
                     callback_data="panel:message:welcome",
                     style="primary",
@@ -629,6 +646,22 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if message is None or not message.text:
         return
 
+    if context.user_data.pop("checkid_mode", False):
+        repository: IDRepository = context.application.bot_data["repository"]
+        value = message.text.strip()
+        if not value:
+            context.user_data["checkid_mode"] = True
+            await message.reply_text(
+                "Send the ID you want to check.",
+                reply_markup=_panel_home_markup(),
+            )
+            return
+        await message.reply_text(
+            _check_id_text(repository, value),
+            reply_markup=_panel_home_markup(),
+        )
+        return
+
     message_key = context.user_data.pop("message_edit_mode", None)
     if message_key in {
         WELCOME_MESSAGE_KEY,
@@ -732,6 +765,7 @@ async def handle_panel_callback(
     await query.answer()
     data = query.data or ""
     repository: IDRepository = context.application.bot_data["repository"]
+    context.user_data.pop("checkid_mode", None)
 
     if data == "panel:clear_ids:menu":
         await query.edit_message_text(
@@ -795,6 +829,25 @@ async def handle_panel_callback(
     if data == "panel:grouplists":
         await query.edit_message_text(
             _group_list_text(repository),
+            reply_markup=_panel_home_markup(),
+        )
+        return
+    if data == "panel:checkid":
+        context.user_data["checkid_mode"] = True
+        await query.edit_message_text(
+            "CHECK ID\n\nSend the ID you want to check.",
+            reply_markup=_panel_home_markup(),
+        )
+        return
+    if data == "panel:recent":
+        await query.edit_message_text(
+            _recent_text(repository),
+            reply_markup=_panel_home_markup(),
+        )
+        return
+    if data == "panel:duplicates":
+        await query.edit_message_text(
+            _duplicates_text(repository),
             reply_markup=_panel_home_markup(),
         )
         return
@@ -1047,20 +1100,22 @@ async def check_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     value = context.args[0].strip()
     repository: IDRepository = context.application.bot_data["repository"]
+    await update.effective_message.reply_text(_check_id_text(repository, value))
+
+
+def _check_id_text(repository: IDRepository, value: str) -> str:
     try:
         record = repository.find_by_id(value)
     except Exception:
         LOGGER.exception("Database error during /checkid")
-        await update.effective_message.reply_text("Unable to check that ID right now.")
-        return
+        return "Unable to check that ID right now."
 
     if record is None:
-        await update.effective_message.reply_text(
-            f"🔎 ID CHECK\nID: {value}\nStatus: 🟢 NOT FOUND"
-        )
-        return
-    await update.effective_message.reply_text(
-        _format_record(record, heading="🔎 ID CHECK\nStatus: 🔴 DUPLICATE", occurrences_label="Occurrences")
+        return f"🔎 ID CHECK\nID: {value}\nStatus: 🟢 NOT FOUND"
+    return _format_record(
+        record,
+        heading="🔎 ID CHECK\nStatus: 🔴 DUPLICATE",
+        occurrences_label="Occurrences",
     )
 
 
@@ -1089,38 +1144,42 @@ async def recent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _is_admin(update, context):
         return
     repository: IDRepository = context.application.bot_data["repository"]
+    await update.effective_message.reply_text(_recent_text(repository))
+
+
+def _recent_text(repository: IDRepository) -> str:
     try:
         rows = repository.recent_occurrences()
     except Exception:
         LOGGER.exception("Database error during /recent")
-        await update.effective_message.reply_text("Unable to load recent IDs right now.")
-        return
+        return "Unable to load recent IDs right now."
     if not rows:
-        await update.effective_message.reply_text("🕐 RECENT IDS\nNo IDs detected yet.")
-        return
+        return "🕐 RECENT IDS\nNo IDs detected yet."
     lines = ["🕐 RECENT IDS"]
     for row in rows:
         lines.append(f"{row['id']} — {row.get('user', 'unknown')} — {_format_timestamp(row.get('date'))}")
-    await update.effective_message.reply_text("\n".join(lines))
+    return "\n".join(lines)
 
 
 async def duplicates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _is_admin(update, context):
         return
     repository: IDRepository = context.application.bot_data["repository"]
+    await update.effective_message.reply_text(_duplicates_text(repository))
+
+
+def _duplicates_text(repository: IDRepository) -> str:
     try:
         rows = repository.recent_occurrences(duplicates_only=True)
     except Exception:
         LOGGER.exception("Database error during /duplicates")
-        await update.effective_message.reply_text("Unable to load recent duplicates right now.")
-        return
+        return "Unable to load recent duplicates right now."
     if not rows:
-        await update.effective_message.reply_text("🔴 RECENT DUPLICATES\nNo duplicates detected yet.")
-        return
+        return "🔴 RECENT DUPLICATES\nNo duplicates detected yet."
     lines = ["🔴 RECENT DUPLICATES"]
     for row in rows:
         lines.append(f"{row['id']} — {row.get('user', 'unknown')} — {_format_timestamp(row.get('date'))}")
-    await update.effective_message.reply_text("\n".join(lines))
+    return "\n".join(lines)
 
 
 async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

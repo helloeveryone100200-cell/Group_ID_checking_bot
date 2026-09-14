@@ -11,6 +11,7 @@ from handlers import (
     _send_broadcast,
     clear_ids,
     control_panel,
+    handle_admin_text,
     handle_panel_callback,
     start,
 )
@@ -79,6 +80,9 @@ def test_control_panel_is_only_sent_to_admins() -> None:
         "Status",
         "User Lists",
         "Group Lists",
+        "Check ID",
+        "Recent",
+        "Duplicates",
         "Welcome Message",
         "Duplicate Warning",
         "Control Panel Message",
@@ -88,6 +92,9 @@ def test_control_panel_is_only_sent_to_admins() -> None:
     ]
     assert [button.style for button in buttons] == [
         "primary",
+        "success",
+        "success",
+        "success",
         "success",
         "success",
         "primary",
@@ -117,6 +124,54 @@ def test_control_panel_uses_saved_message_template() -> None:
 
     admin_message.reply_text.assert_awaited_once()
     assert admin_message.reply_text.await_args.args[0] == "CUSTOM CONTROL PANEL"
+
+
+def test_control_panel_quick_lookup_buttons_run_their_commands() -> None:
+    repository = _repository()
+    repository.id_records.insert_one(
+        {
+            "id": "123",
+            "user": "alice",
+            "date": datetime.now(timezone.utc),
+            "occurrence_count": 2,
+        }
+    )
+    context = _context(repository, admin_ids=frozenset({100}))
+
+    recent_query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
+    asyncio.run(
+        handle_panel_callback(
+            _callback_update(100, "panel:recent", recent_query),
+            context,
+        )
+    )
+    assert "🕐 RECENT IDS" in recent_query.edit_message_text.await_args.args[0]
+    assert "123 — alice" in recent_query.edit_message_text.await_args.args[0]
+
+    duplicate_query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
+    asyncio.run(
+        handle_panel_callback(
+            _callback_update(100, "panel:duplicates", duplicate_query),
+            context,
+        )
+    )
+    assert "🔴 RECENT DUPLICATES" in duplicate_query.edit_message_text.await_args.args[0]
+    assert "123 — alice" in duplicate_query.edit_message_text.await_args.args[0]
+
+    check_query = SimpleNamespace(answer=AsyncMock(), edit_message_text=AsyncMock())
+    asyncio.run(
+        handle_panel_callback(
+            _callback_update(100, "panel:checkid", check_query),
+            context,
+        )
+    )
+    assert context.user_data["checkid_mode"] is True
+    assert "Send the ID" in check_query.edit_message_text.await_args.args[0]
+
+    check_message = SimpleNamespace(reply_text=AsyncMock(), text="123")
+    asyncio.run(handle_admin_text(_update(100, check_message), context))
+    assert "🔎 ID CHECK" in check_message.reply_text.await_args.args[0]
+    assert "Occurrences: 2" in check_message.reply_text.await_args.args[0]
 
 
 def test_start_add_to_chat_button_is_primary() -> None:

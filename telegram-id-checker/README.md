@@ -136,6 +136,9 @@ The panel includes:
 - `Status` — bot, ID, user, and registered-group counts
 - `User Lists` — current users and their current ID counts
 - `Group Lists` — groups that have delivered messages to the bot
+- `Check ID` — enter an ID and run the `/checkid` lookup
+- `Recent` — show the same result as `/recent`
+- `Duplicates` — show the same result as `/duplicates`
 - `Welcome Message` — replace the private `/start` welcome message
 - `Duplicate Warning` — replace the duplicate warning template
 - `Control Panel Message` — replace the control panel heading and instructions
