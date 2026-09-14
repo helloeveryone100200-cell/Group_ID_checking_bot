@@ -144,6 +144,7 @@ The panel includes:
 - `Control Panel Message` — replace the control panel heading and instructions
 - `Clear IDs` — open the two-option data-clearing flow
 - `Broadcast All` — preview and send a message to all registered groups
+- `Broadcast Users` — preview and send a message to all users seen by the bot
 - `Broadcast Single` — preview and send to one registered group
 
 The panel uses Telegram's native inline-button styles: `primary` (blue),
@@ -160,6 +161,11 @@ need to be entered manually. Duplicate warning templates support these
 placeholders:
 `{id}`, `{first_user}`, `{first_date}`, `{current_user}`, `{current_date}`,
 and `{occurrence_count}`.
+
+Users are registered when they use `/start` or send a message in a monitored
+group. Telegram only allows a bot to initiate a private conversation with a
+user who has already opened the bot, so users who have not started the bot may
+appear as failed deliveries in the broadcast result.
 
 ## Render deployment
 

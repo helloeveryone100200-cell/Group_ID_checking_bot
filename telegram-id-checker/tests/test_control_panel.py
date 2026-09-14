@@ -88,6 +88,7 @@ def test_control_panel_is_only_sent_to_admins() -> None:
         "Control Panel Message",
         "Clear IDs",
         "Broadcast All",
+        "Broadcast Users",
         "Broadcast Single",
     ]
     assert [button.style for button in buttons] == [
@@ -100,6 +101,7 @@ def test_control_panel_is_only_sent_to_admins() -> None:
         "primary",
         "primary",
         "primary",
+        "danger",
         "danger",
         "danger",
         "danger",
@@ -212,6 +214,25 @@ def test_broadcast_all_sends_only_to_registered_groups() -> None:
         call.kwargs["chat_id"] for call in context.bot.send_message.await_args_list
     }
     assert sent_chat_ids == {"-1001", "-1002"}
+
+
+def test_broadcast_users_sends_to_registered_users() -> None:
+    repository = _repository()
+    now = datetime.now(timezone.utc)
+    repository.record_user("101", "first_user", "First User", now)
+    repository.record_user("202", None, "Second User", now)
+    context = _context(repository, admin_ids=frozenset({100}))
+
+    result = asyncio.run(
+        _send_broadcast(context, mode="users", text="System announcement")
+    )
+
+    assert "Target: all users" in result
+    assert "Sent: 2" in result
+    sent_chat_ids = {
+        call.kwargs["chat_id"] for call in context.bot.send_message.await_args_list
+    }
+    assert sent_chat_ids == {"101", "202"}
 
 
 def test_clear_ids_shows_two_primary_options() -> None:

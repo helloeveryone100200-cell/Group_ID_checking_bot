@@ -56,6 +56,7 @@ class IDRepository:
         self.database = self.client[database_name]
         self.id_records = self.database["id_records"]
         self.group_records = self.database["group_records"]
+        self.user_records = self.database["user_records"]
         self.message_templates = self.database["message_templates"]
         self.processed_messages = self.database["processed_messages"]
 
@@ -79,6 +80,15 @@ class IDRepository:
         self.group_records.create_index(
             [("last_seen", DESCENDING)],
             name="last_seen_desc",
+        )
+        self.user_records.create_index(
+            [("user_id", ASCENDING)],
+            unique=True,
+            name="user_id_unique",
+        )
+        self.user_records.create_index(
+            [("last_seen", DESCENDING)],
+            name="user_last_seen_desc",
         )
         self.message_templates.create_index(
             [("key", ASCENDING)],
@@ -142,6 +152,35 @@ class IDRepository:
 
     def find_group(self, chat_id: str) -> dict[str, Any] | None:
         return self.group_records.find_one({"chat_id": chat_id}, {"_id": 0})
+
+    def record_user(
+        self,
+        user_id: str,
+        username: str | None,
+        display_name: str,
+        timestamp: datetime,
+    ) -> None:
+        """Register the latest Telegram user seen by the bot."""
+        self.user_records.update_one(
+            {"user_id": user_id},
+            {
+                "$set": {
+                    "username": username,
+                    "display_name": display_name,
+                    "last_seen": timestamp,
+                }
+            },
+            upsert=True,
+        )
+
+    def list_users(self, *, limit: int | None = 100) -> list[dict[str, Any]]:
+        cursor = self.user_records.find(
+            {},
+            {"_id": 0, "user_id": 1, "username": 1, "display_name": 1},
+        ).sort("last_seen", DESCENDING)
+        if limit is not None:
+            cursor = cursor.limit(limit)
+        return list(cursor)
 
     def get_message_template(self, key: str) -> dict[str, Any] | None:
         return self.message_templates.find_one(

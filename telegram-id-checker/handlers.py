@@ -122,6 +122,11 @@ def _control_panel_markup() -> InlineKeyboardMarkup:
                     style="danger",
                 ),
                 InlineKeyboardButton(
+                    "Broadcast Users",
+                    callback_data="panel:broadcast:users",
+                    style="danger",
+                ),
+                InlineKeyboardButton(
                     "Broadcast Single",
                     callback_data="panel:broadcast:single",
                     style="danger",
@@ -388,8 +393,15 @@ def _user_details(update: Update) -> tuple[str, str | None, str]:
     user = update.effective_user
     if user is None:
         return "unknown", None, "Unknown user"
-    display_name = " ".join(part for part in [user.first_name, user.last_name] if part).strip()
-    return str(user.id), user.username, display_name or str(user.id)
+    user_id = getattr(user, "id", None)
+    if user_id is None:
+        return "unknown", None, "Unknown user"
+    display_name = " ".join(
+        part
+        for part in [getattr(user, "first_name", None), getattr(user, "last_name", None)]
+        if part
+    ).strip()
+    return str(user_id), getattr(user, "username", None), display_name or str(user_id)
 
 
 def _chat_details(update: Update) -> tuple[str, str]:
@@ -413,9 +425,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     if message is None:
         return
+    repository: IDRepository = context.application.bot_data["repository"]
+    user_id, username, display_name = _user_details(update)
+    if user_id != "unknown":
+        try:
+            repository.record_user(user_id, username, display_name, utc_now())
+        except Exception:
+            LOGGER.exception("Database error while registering user from /start")
     chat = update.effective_chat
     if chat is not None and chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
-        repository: IDRepository = context.application.bot_data["repository"]
         try:
             repository.record_group(
                 str(chat.id),
@@ -438,7 +456,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             ]
         ]
     )
-    repository: IDRepository = context.application.bot_data["repository"]
     welcome_template = _message_template(
         repository,
         WELCOME_MESSAGE_KEY,
@@ -612,24 +629,33 @@ async def _send_broadcast(
     repository: IDRepository = context.application.bot_data["repository"]
     if mode == "all":
         targets = repository.list_groups(limit=None)
+        target_key = "chat_id"
+        target_label = "all groups"
+    elif mode == "users":
+        targets = repository.list_users(limit=None)
+        target_key = "user_id"
+        target_label = "all users"
     else:
         target = repository.find_group(chat_id or "")
         targets = [target] if target is not None else []
+        target_key = "chat_id"
+        target_label = "single group"
 
     if not targets:
-        return "🔴 BROADCAST RESULT\n\nNo target groups found."
+        empty_label = "users" if mode == "users" else "groups"
+        return f"🔴 BROADCAST RESULT\n\nNo target {empty_label} found."
 
     sent = 0
     failed = 0
     for target in targets:
+        recipient_id = target[target_key]
         try:
-            await context.bot.send_message(chat_id=target["chat_id"], text=text)
+            await context.bot.send_message(chat_id=recipient_id, text=text)
             sent += 1
         except Exception:
             failed += 1
-            LOGGER.exception("Broadcast failed for chat_id=%s", target.get("chat_id"))
+            LOGGER.exception("Broadcast failed for recipient_id=%s", recipient_id)
 
-    target_label = "all groups" if mode == "all" else "single group"
     return (
         "🔴 BROADCAST RESULT\n\n"
         f"Target: {target_label}\n"
@@ -696,7 +722,7 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     mode = context.user_data.pop("broadcast_mode", None)
-    if mode not in {"all", "single"}:
+    if mode not in {"all", "users", "single"}:
         return
 
     text = message.text.strip()
@@ -928,6 +954,16 @@ async def handle_panel_callback(
             reply_markup=_broadcast_cancel_markup(),
         )
         return
+    if data == "panel:broadcast:users":
+        context.user_data.pop("message_edit_mode", None)
+        context.user_data.pop("pending_broadcast", None)
+        context.user_data["broadcast_mode"] = "users"
+        await query.edit_message_text(
+            "🔴 BROADCAST USERS\n\n"
+            "Send the message to broadcast to all registered users.",
+            reply_markup=_broadcast_cancel_markup(),
+        )
+        return
     if data == "panel:broadcast:single":
         context.user_data.pop("message_edit_mode", None)
         context.user_data.pop("pending_broadcast", None)
@@ -991,6 +1027,12 @@ async def handle_group_message(
 
     repository: IDRepository = context.application.bot_data["repository"]
     timestamp = utc_now()
+    user_id, username, display_name = _user_details(update)
+    if user_id != "unknown":
+        try:
+            repository.record_user(user_id, username, display_name, timestamp)
+        except Exception:
+            LOGGER.exception("Database error while registering a group user")
     try:
         repository.record_group(
             str(chat.id),
@@ -1012,7 +1054,6 @@ async def handle_group_message(
     if parsed.value is None:
         return
 
-    user_id, username, display_name = _user_details(update)
     chat_id, chat_title = _chat_details(update)
     message_id = _message_id(update)
     try:
