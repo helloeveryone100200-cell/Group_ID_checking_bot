@@ -43,9 +43,18 @@ def test_one_record_is_updated_for_repeated_checks(repository: IDRepository) -> 
     assert second.previous_record["user"] == "@tester"
     assert repository.id_records.count_documents({"id": "000123"}) == 1
     record = repository.find_by_id("000123")
-    assert set(record) == {"id", "user", "date", "occurrence_count"}
+    assert set(record) == {
+        "id",
+        "user",
+        "date",
+        "occurrence_count",
+        "first_seen_user",
+        "first_seen_date",
+    }
     assert record["user"] == "@tester"
     assert record["occurrence_count"] == 2
+    assert second.record["first_seen_user"] == "@tester"
+    assert second.record["first_seen_date"].date() == first.record["date"].date()
 
 
 def test_previous_user_is_returned_before_each_duplicate_update(
@@ -66,12 +75,54 @@ def test_previous_user_is_returned_before_each_duplicate_update(
     )
 
     assert first.record["user"] == "@userA"
+    assert first.record["first_seen_user"] == "@userA"
+    assert first.record["first_seen_date"] == first_date
     assert second.previous_record["user"] == "@userA"
     assert second.record["user"] == "@userB"
     assert second.record["occurrence_count"] == 2
+    assert second.record["first_seen_user"] == "@userA"
+    assert second.record["first_seen_date"] == first_date.replace(tzinfo=None)
     assert third.previous_record["user"] == "@userB"
     assert third.record["user"] == "@userC"
     assert third.record["occurrence_count"] == 3
+    assert third.record["first_seen_user"] == "@userA"
+    assert third.record["first_seen_date"] == first_date.replace(tzinfo=None)
+
+
+def test_old_current_schema_backfills_first_seen_once(repository: IDRepository) -> None:
+    stored_date = datetime(2026, 9, 12, tzinfo=timezone.utc)
+    repository.id_records.insert_one(
+        {
+            "id": "legacy-current",
+            "user": "@old_user",
+            "date": stored_date,
+            "occurrence_count": 4,
+        }
+    )
+
+    second = repository.record_occurrence(
+        _metadata(
+            "legacy-current",
+            "2",
+            username="second_user",
+            timestamp=datetime(2026, 9, 13, tzinfo=timezone.utc),
+        )
+    )
+    third = repository.record_occurrence(
+        _metadata(
+            "legacy-current",
+            "3",
+            username="third_user",
+            timestamp=datetime(2026, 9, 14, tzinfo=timezone.utc),
+        )
+    )
+
+    assert second.record["first_seen_user"] == "@old_user"
+    assert second.record["first_seen_date"] == stored_date.replace(tzinfo=None)
+    assert third.record["first_seen_user"] == "@old_user"
+    assert third.record["first_seen_date"] == stored_date.replace(tzinfo=None)
+    saved = repository.find_by_id("legacy-current")
+    assert saved["first_seen_date"] == stored_date.replace(tzinfo=None)
 
 
 def test_same_user_is_still_a_duplicate(repository: IDRepository) -> None:
@@ -106,10 +157,19 @@ def test_legacy_record_is_reduced_to_the_current_schema(repository: IDRepository
     repository.connect()
     record = repository.find_by_id("legacy")
 
-    assert set(record) == {"id", "user", "date", "occurrence_count"}
+    assert set(record) == {
+        "id",
+        "user",
+        "date",
+        "occurrence_count",
+        "first_seen_user",
+        "first_seen_date",
+    }
     assert record["user"] == "@old_user"
     assert record["date"] == first_seen.replace(tzinfo=None)
     assert record["occurrence_count"] == 4
+    assert record["first_seen_user"] == "@old_user"
+    assert record["first_seen_date"] == first_seen.replace(tzinfo=None)
 
 
 def test_group_registry_and_control_panel_queries(repository: IDRepository) -> None:
