@@ -225,7 +225,15 @@ class IDRepository:
 
     def _migrate_legacy_records(self) -> None:
         """Keep existing records while reducing them to the current schema."""
-        allowed_fields = {"_id", "id", "user", "date", "occurrence_count"}
+        allowed_fields = {
+            "_id",
+            "id",
+            "user",
+            "date",
+            "occurrence_count",
+            "first_seen_user",
+            "first_seen_date",
+        }
         migrated = 0
         for record in self.id_records.find({}):
             if (
@@ -259,12 +267,29 @@ class IDRepository:
             except (TypeError, ValueError):
                 occurrence_count = 1
 
+            first_seen_user = record.get("first_seen_user")
+            if not first_seen_user:
+                legacy_first_username = record.get("first_username")
+                if legacy_first_username:
+                    first_seen_user = str(legacy_first_username)
+                    if not first_seen_user.startswith("@"):
+                        first_seen_user = f"@{first_seen_user}"
+                else:
+                    first_seen_user = user
+            first_seen_date = (
+                record.get("first_seen_date")
+                or record.get("first_seen")
+                or date
+            )
+
             clean_record = {
                 "_id": record["_id"],
                 "id": str(record["id"]),
                 "user": user,
                 "date": date,
                 "occurrence_count": occurrence_count,
+                "first_seen_user": str(first_seen_user),
+                "first_seen_date": first_seen_date,
             }
             self.id_records.replace_one({"_id": record["_id"]}, clean_record)
             migrated += 1
@@ -280,11 +305,14 @@ class IDRepository:
 
     @staticmethod
     def _record_from_metadata(metadata: OccurrenceMetadata) -> dict[str, Any]:
+        user = IDRepository._user_from_metadata(metadata)
         return {
             "id": metadata.id,
-            "user": IDRepository._user_from_metadata(metadata),
+            "user": user,
             "date": metadata.timestamp,
             "occurrence_count": 1,
+            "first_seen_user": user,
+            "first_seen_date": metadata.timestamp,
         }
 
     def record_occurrence(self, metadata: OccurrenceMetadata) -> RecordResult:
@@ -309,14 +337,56 @@ class IDRepository:
                 # A transient race with a manually removed record is safest to
                 # surface to the caller rather than treating it as a new ID.
                 raise RuntimeError("ID record disappeared during duplicate update")
+            # Older records do not have first-seen fields. Their original
+            # first occurrence may no longer be recoverable because the old
+            # schema overwrote user/date on every duplicate, so seed any
+            # missing fields from the best metadata still available.
+            first_seen_user = (
+                previous.get("first_seen_user")
+                or previous.get("user")
+                or primary["user"]
+            )
+            first_seen_date = (
+                previous.get("first_seen_date")
+                or previous.get("date")
+                or metadata.timestamp
+            )
+
+            if not previous.get("first_seen_user"):
+                self.id_records.update_one(
+                    {
+                        "id": metadata.id,
+                        "$or": [
+                            {"first_seen_user": {"$exists": False}},
+                            {"first_seen_user": None},
+                        ],
+                    },
+                    {"$set": {"first_seen_user": first_seen_user}},
+                )
+            if not previous.get("first_seen_date"):
+                self.id_records.update_one(
+                    {
+                        "id": metadata.id,
+                        "$or": [
+                            {"first_seen_date": {"$exists": False}},
+                            {"first_seen_date": None},
+                        ],
+                    },
+                    {"$set": {"first_seen_date": first_seen_date}},
+                )
+
             occurrence_count = int(previous.get("occurrence_count", 1)) + 1
             updated = {
                 "id": metadata.id,
                 "user": primary["user"],
                 "date": primary["date"],
                 "occurrence_count": occurrence_count,
+                "first_seen_user": first_seen_user,
+                "first_seen_date": first_seen_date,
             }
             previous["occurrence_count"] = int(previous.get("occurrence_count", 1))
+            previous["first_seen_user"] = first_seen_user
+            previous["first_seen_date"] = first_seen_date
             return RecordResult(
                 is_new=False,
                 record=updated,
