@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import datetime, time, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity, Update
 from telegram.constants import ChatType
@@ -479,12 +481,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
+def _display_timezone() -> ZoneInfo:
+    """Return the configured timezone used when showing calendar dates."""
+    name = os.getenv("DISPLAY_TIMEZONE", "Asia/Bangkok").strip() or "Asia/Bangkok"
+    return ZoneInfo(name)
+
+
 def _format_timestamp(value: datetime | None) -> str:
+    """Format a stored UTC timestamp as a local calendar date."""
     if value is None:
         return "unknown"
     if value.tzinfo is None:
+        # MongoDB commonly returns naive datetimes even when UTC was stored.
         value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    return value.astimezone(_display_timezone()).strftime("%Y-%m-%d")
+
+
+def _message_timestamp(message: Any) -> datetime:
+    """Use Telegram's original message time, normalized to UTC."""
+    value = getattr(message, "date", None)
+    if not isinstance(value, datetime):
+        return utc_now()
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _format_record(record: dict[str, Any], *, heading: str, occurrences_label: str) -> str:
@@ -1026,18 +1046,19 @@ async def handle_group_message(
         return
 
     repository: IDRepository = context.application.bot_data["repository"]
-    timestamp = utc_now()
+    observed_at = utc_now()
+    timestamp = _message_timestamp(message)
     user_id, username, display_name = _user_details(update)
     if user_id != "unknown":
         try:
-            repository.record_user(user_id, username, display_name, timestamp)
+            repository.record_user(user_id, username, display_name, observed_at)
         except Exception:
             LOGGER.exception("Database error while registering a group user")
     try:
         repository.record_group(
             str(chat.id),
             chat.title or chat.full_name or str(chat.id),
-            timestamp,
+            observed_at,
         )
     except Exception:
         LOGGER.exception("Database error while registering a group")

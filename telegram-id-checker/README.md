@@ -86,6 +86,14 @@ the separate `processed_messages` collection using a unique
 `(chat_id, message_id)` index. This prevents a redelivered Telegram update
 from incrementing an ID twice.
 
+Duplicate warnings use a rolling comparison: `First Seen` displays the user
+and date stored before the current duplicate, while `Current` displays the
+user and date from the new Telegram message. After that warning is prepared,
+the ID record keeps the newest user/date for the next duplicate. Dates come
+from Telegram's message timestamp, not the server's processing clock, and are
+formatted in `DISPLAY_TIMEZONE` (default `Asia/Bangkok`). Set this variable
+to another IANA timezone when needed.
+
 Run the tests:
 
 ```bash
