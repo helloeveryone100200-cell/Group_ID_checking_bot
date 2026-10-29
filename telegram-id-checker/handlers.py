@@ -1118,8 +1118,16 @@ async def handle_group_message(
         warning_template["entities"],
         {
             "id": parsed.value,
-            "first_user": str(previous.get("user", "unknown")),
-            "first_date": _format_timestamp(previous.get("date")),
+            "first_user": str(
+                result.record.get("first_seen_user")
+                or previous.get("first_seen_user")
+                or previous.get("user", "unknown")
+            ),
+            "first_date": _format_timestamp(
+                result.record.get("first_seen_date")
+                or previous.get("first_seen_date")
+                or previous.get("date")
+            ),
             "current_user": _actor(username, display_name, user_id),
             "current_date": _format_timestamp(metadata.timestamp),
             "occurrence_count": str(result.record.get("occurrence_count", 2)),
