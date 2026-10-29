@@ -1,11 +1,12 @@
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import mongomock
 from telegram.constants import ChatType
 
-from database import IDRepository
+from database import IDRepository, OccurrenceMetadata
 from handlers import handle_group_message
 
 
@@ -90,6 +91,51 @@ def test_same_id_in_a_new_group_message_is_still_a_duplicate() -> None:
     record = repository.find_by_id("123")
     assert record["occurrence_count"] == 2
     second_message.effective_message.reply_text.assert_awaited_once()
+
+
+def test_duplicate_warning_uses_original_first_seen_date() -> None:
+    repository = _repository()
+    context = _context(repository)
+    first_seen_date = datetime(2026, 10, 27, 12, tzinfo=timezone.utc)
+    later_seen_date = datetime(2026, 10, 28, 12, tzinfo=timezone.utc)
+
+    repository.record_occurrence(
+        OccurrenceMetadata(
+            id="123",
+            chat_id="-1001",
+            chat_title="Test Group",
+            message_id="8",
+            user_id="10",
+            username="first_user",
+            display_name="First User",
+            timestamp=first_seen_date,
+        )
+    )
+    repository.record_occurrence(
+        OccurrenceMetadata(
+            id="123",
+            chat_id="-1001",
+            chat_title="Test Group",
+            message_id="9",
+            user_id="11",
+            username="second_user",
+            display_name="Second User",
+            timestamp=later_seen_date,
+        )
+    )
+
+    duplicate = _update(message_id=10, update_id=102, value="123")
+    asyncio.run(handle_group_message(duplicate, context))
+
+    duplicate.effective_message.reply_text.assert_awaited_once()
+    warning = duplicate.effective_message.reply_text.await_args.args[0]
+    first_seen_section = warning.split("Current:", maxsplit=1)[0]
+    current_section = warning.split("Current:", maxsplit=1)[1]
+    assert "First Seen:" in first_seen_section
+    assert "@first_user" in first_seen_section
+    assert "2026-10-27" in first_seen_section
+    assert "2026-10-28" not in first_seen_section
+    assert "📅 " in current_section
 
 
 def test_bot_authored_group_message_is_ignored() -> None:
