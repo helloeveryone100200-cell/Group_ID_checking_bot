@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
@@ -42,6 +43,7 @@ class Settings:
     mongodb_server_selection_timeout_ms: int = 10_000
     health_host: str = "0.0.0.0"
     health_port: int = 8080
+    display_timezone: str = "Asia/Bangkok"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -53,9 +55,21 @@ class Settings:
         if not 1 <= health_port <= 65_535:
             raise ConfigError("PORT must be between 1 and 65535")
 
+        display_timezone = os.getenv("DISPLAY_TIMEZONE", "Asia/Bangkok").strip()
+        if not display_timezone:
+            display_timezone = "Asia/Bangkok"
+        try:
+            ZoneInfo(display_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ConfigError(
+                "DISPLAY_TIMEZONE must be a valid IANA timezone, "
+                "for example Asia/Bangkok"
+            ) from exc
+
         return cls(
             bot_token=_required("BOT_TOKEN"),
             mongodb_uri=_required("MONGODB_URI"),
             admin_ids=_parse_admin_ids(_required("ADMIN_IDS")),
             health_port=health_port,
+            display_timezone=display_timezone,
         )
