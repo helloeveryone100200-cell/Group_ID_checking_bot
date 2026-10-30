@@ -206,8 +206,13 @@ def test_forwarded_message_records_forwarder_not_original_author(monkeypatch) ->
     import handlers
 
     monkeypatch.setenv("DISPLAY_TIMEZONE", "Asia/Bangkok")
-    processing_time = datetime(2026, 10, 30, 8, 22, tzinfo=timezone.utc)
-    monkeypatch.setattr(handlers, "utc_now", lambda: processing_time)
+    processing_times = iter(
+        [
+            datetime(2026, 10, 29, 8, 0, tzinfo=timezone.utc),
+            datetime(2026, 10, 30, 8, 22, tzinfo=timezone.utc),
+        ]
+    )
+    monkeypatch.setattr(handlers, "utc_now", lambda: next(processing_times))
     repository = _repository()
     context = _context(repository)
 
