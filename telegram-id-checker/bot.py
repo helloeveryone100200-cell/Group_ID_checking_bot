@@ -40,6 +40,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 def configure_logging() -> None:
+    # HTTPX request logs include complete Telegram API URLs, which contain the
+    # bot token in their path. Never emit those URLs into service logs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
