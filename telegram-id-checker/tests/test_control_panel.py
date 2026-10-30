@@ -119,6 +119,37 @@ def test_duplicate_warning_editor_accepts_formatted_article_caption() -> None:
     assert "updated successfully" in message.reply_text.await_args.args[0]
 
 
+def test_duplicate_warning_editor_saves_native_rich_message_article() -> None:
+    repository = _repository()
+    context = _context(repository, admin_ids=frozenset({100}))
+    context.user_data["message_edit_mode"] = "duplicate_warning"
+    rich_message = {
+        "blocks": [
+            {"type": "heading", "size": 2, "text": "Duplicate Warning"},
+            {"type": "paragraph", "text": "{details}"},
+        ],
+        "is_rtl": False,
+    }
+    message = SimpleNamespace(
+        text=None,
+        caption=None,
+        api_kwargs={"rich_message": rich_message},
+        reply_text=AsyncMock(),
+    )
+
+    asyncio.run(handle_admin_text(_update(100, message), context))
+
+    assert repository.get_message_template("duplicate_warning") == {
+        "key": "duplicate_warning",
+        "text": "",
+        "entities": [],
+        "rich_message": rich_message,
+    }
+    assert "message_edit_mode" not in context.user_data
+    assert "Article updated successfully" in message.reply_text.await_args.args[0]
+
+
+
 def test_control_panel_is_only_sent_to_admins() -> None:
     repository = _repository()
     admin_message = SimpleNamespace(reply_text=AsyncMock())
