@@ -36,6 +36,7 @@ def _update(
     is_bot: bool = False,
     username: str = "tester",
     sent_at: datetime | None = None,
+    chat_id: int = -1001,
 ) -> SimpleNamespace:
     sender = SimpleNamespace(
         id=42,
@@ -53,7 +54,7 @@ def _update(
         reply_text=AsyncMock(),
     )
     chat = SimpleNamespace(
-        id=-1001,
+        id=chat_id,
         type=ChatType.GROUP,
         title="Test Group",
         full_name="Test Group",
@@ -96,29 +97,50 @@ def test_same_id_in_a_new_group_message_is_still_a_duplicate() -> None:
     second_message.effective_message.reply_text.assert_awaited_once()
 
 
-def test_first_seen_rolls_to_the_previous_user_and_dates_are_message_dates(
-    monkeypatch,
-) -> None:
+def test_first_seen_rolls_across_groups_and_current_uses_check_time(monkeypatch) -> None:
+    import handlers
+
     monkeypatch.setenv("DISPLAY_TIMEZONE", "Asia/Bangkok")
     repository = _repository()
     context = _context(repository)
 
+    processing_times = iter(
+        [
+            datetime(2026, 10, 29, 15, 19, tzinfo=timezone.utc),
+            datetime(2026, 10, 30, 8, 22, tzinfo=timezone.utc),
+            datetime(2026, 10, 31, 8, 0, tzinfo=timezone.utc),
+            datetime(2026, 11, 1, 8, 0, tzinfo=timezone.utc),
+        ]
+    )
+    monkeypatch.setattr(handlers, "utc_now", lambda: next(processing_times))
+
     events = [
-        ("userA", datetime(2026, 10, 27, 4, tzinfo=timezone.utc)),
-        ("userB", datetime(2026, 10, 29, 4, tzinfo=timezone.utc)),
-        ("userC", datetime(2026, 10, 30, 4, tzinfo=timezone.utc)),
-        ("userD", datetime(2026, 10, 31, 4, tzinfo=timezone.utc)),
+        ("userA", -1001, datetime(2026, 10, 29, 15, 19, tzinfo=timezone.utc)),
+        # Simulate a message whose Telegram message.date is stale; Current must
+        # still reflect when this bot actually checked the ID in the new group.
+        ("userB", -1002, datetime(2026, 10, 29, 15, 19, tzinfo=timezone.utc)),
+        ("userC", -1003, datetime(2026, 10, 31, 8, 0, tzinfo=timezone.utc)),
+        ("userD", -1004, datetime(2026, 11, 1, 8, 0, tzinfo=timezone.utc)),
     ]
     notifications = []
 
-    for index, (username, sent_at) in enumerate(events, start=1):
+    for index, (username, chat_id, sent_at) in enumerate(events, start=1):
         update = _update(
             message_id=100 + index,
             update_id=200 + index,
             value="rolling-123",
             username=username,
             sent_at=sent_at,
+            chat_id=chat_id,
         )
+        if index == 2:
+            update.effective_user = SimpleNamespace(
+                id=42,
+                username="userA",
+                first_name="userA",
+                last_name="User",
+                is_bot=False,
+            )
         asyncio.run(handle_group_message(update, context))
         if index == 1:
             update.effective_message.reply_text.assert_not_awaited()
@@ -127,27 +149,9 @@ def test_first_seen_rolls_to_the_previous_user_and_dates_are_message_dates(
             notifications.append(update.effective_message.reply_text.await_args.args[0])
 
     expectations = [
-        (
-            "@userA",
-            "2026-10-27",
-            "@userB",
-            "2026-10-29",
-            "Total occurrences: 2",
-        ),
-        (
-            "@userB",
-            "2026-10-29",
-            "@userC",
-            "2026-10-30",
-            "Total occurrences: 3",
-        ),
-        (
-            "@userC",
-            "2026-10-30",
-            "@userD",
-            "2026-10-31",
-            "Total occurrences: 4",
-        ),
+        ("@userA", "2026-10-29", "@userB", "2026-10-30", "Total occurrences: 2"),
+        ("@userB", "2026-10-30", "@userC", "2026-10-31", "Total occurrences: 3"),
+        ("@userC", "2026-10-31", "@userD", "2026-11-01", "Total occurrences: 4"),
     ]
     for warning, (previous_user, previous_date, current_user, current_date, count) in zip(
         notifications, expectations, strict=True
@@ -163,9 +167,37 @@ def test_first_seen_rolls_to_the_previous_user_and_dates_are_message_dates(
 
     record = repository.find_by_id("rolling-123")
     assert record["user"] == "@userD"
-    assert record["date"] == events[-1][1].replace(tzinfo=None)
+    assert record["date"] == datetime(2026, 11, 1, 8, 0)
     assert record["occurrence_count"] == 4
     assert set(record) == {"id", "user", "date", "occurrence_count"}
+
+
+def test_sender_chat_replaces_telegram_fake_from_user(monkeypatch) -> None:
+    import handlers
+
+    monkeypatch.setenv("DISPLAY_TIMEZONE", "Asia/Bangkok")
+    processing_time = datetime(2026, 10, 30, 8, 22, tzinfo=timezone.utc)
+    monkeypatch.setattr(handlers, "utc_now", lambda: processing_time)
+    repository = _repository()
+    context = _context(repository)
+
+    update = _update(
+        message_id=500,
+        update_id=600,
+        value="chat-sender-123",
+        username="nobody_to_him_19367074030",
+    )
+    update.effective_message.sender_chat = SimpleNamespace(
+        id=-200200,
+        username="source_channel",
+        title="Source Channel",
+    )
+    asyncio.run(handle_group_message(update, context))
+
+    record = repository.find_by_id("chat-sender-123")
+    assert record["user"] == "@source_channel"
+    assert record["date"] == processing_time.replace(tzinfo=None)
+    assert repository.user_records.count_documents({}) == 0
 
 
 def test_timestamp_date_uses_configured_local_timezone(monkeypatch) -> None:
