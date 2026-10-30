@@ -1,4 +1,4 @@
-from parser import extract_id, parse_id
+from parser import extract_gmail, extract_id, parse_id
 
 
 def test_supported_headers_and_separators() -> None:
@@ -61,3 +61,29 @@ def test_empty_header_still_makes_multiple_headers_ambiguous() -> None:
     parsed = parse_id("ID:\nID: 12345")
     assert parsed.value is None
     assert parsed.ambiguous is True
+
+
+def test_extract_gmail_from_spaced_field_and_preserve_value() -> None:
+    message = (
+        "Gmail                  -  Mimifentahun\\n"
+        "Tele name         -   @Muluyeme\\n"
+        "Username         -    @muluyeme\\n"
+        "ID                - 251904933464"
+    )
+    assert extract_gmail(message) == "Mimifentahun"
+
+
+def test_extract_gmail_supports_case_and_separators() -> None:
+    assert extract_gmail("Name: A\\ngMaIl: sample@example.com\\nID: 123") == "sample@example.com"
+    assert extract_gmail("GMAIL = value-123") == "value-123"
+
+
+def test_missing_empty_or_negative_gmail_is_omitted() -> None:
+    assert extract_gmail("ID: 123\\nName: A") is None
+    assert extract_gmail("Gmail -") is None
+    assert extract_gmail("Gmail - no") is None
+    assert extract_gmail("Gmail - N/A") is None
+
+
+def test_multiple_gmail_fields_are_treated_as_ambiguous() -> None:
+    assert extract_gmail("Gmail - first\\nGmail - second") is None
