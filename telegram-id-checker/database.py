@@ -186,7 +186,13 @@ class IDRepository:
     def get_message_template(self, key: str) -> dict[str, Any] | None:
         return self.message_templates.find_one(
             {"key": key},
-            {"_id": 0, "key": 1, "text": 1, "entities": 1},
+            {
+                "_id": 0,
+                "key": 1,
+                "text": 1,
+                "entities": 1,
+                "rich_message": 1,
+            },
         )
 
     def save_message_template(
@@ -194,16 +200,24 @@ class IDRepository:
         key: str,
         text: str,
         entities: list[dict[str, Any]],
+        *,
+        rich_message: dict[str, Any] | None = None,
     ) -> None:
+        updates: dict[str, Any] = {
+            "$set": {
+                "text": text,
+                "entities": entities,
+                "updated_at": utc_now(),
+            }
+        }
+        if rich_message is None:
+            updates["$unset"] = {"rich_message": ""}
+        else:
+            updates["$set"]["rich_message"] = rich_message
+
         self.message_templates.update_one(
             {"key": key},
-            {
-                "$set": {
-                    "text": text,
-                    "entities": entities,
-                    "updated_at": utc_now(),
-                }
-            },
+            updates,
             upsert=True,
         )
 

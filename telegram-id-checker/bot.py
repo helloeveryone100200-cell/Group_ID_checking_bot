@@ -107,9 +107,7 @@ def main() -> None:
     )
     application.add_handler(
         MessageHandler(
-            filters.ChatType.PRIVATE
-            & (filters.TEXT | filters.CAPTION)
-            & ~filters.COMMAND,
+            filters.ChatType.PRIVATE & ~filters.COMMAND,
             handle_admin_text,
         )
     )
