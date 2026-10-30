@@ -24,7 +24,8 @@ def _context(repository: IDRepository) -> SimpleNamespace:
                 "repository": repository,
                 "admin_ids": frozenset(),
             }
-        )
+        ),
+        bot=SimpleNamespace(_post=AsyncMock()),
     )
 
 
@@ -140,6 +141,49 @@ def test_duplicate_warning_keeps_article_formatting_entities() -> None:
     assert sent_entities[0].type == "bold"
     assert sent_entities[0].offset == 0
     assert sent_entities[0].length == 5
+
+
+def test_duplicate_warning_sends_native_rich_message_and_renders_details() -> None:
+    repository = _repository()
+    repository.record_occurrence(
+        _metadata("rich-123", "first", username="previous_user", gmail="old@example.com")
+    )
+    repository.save_message_template(
+        "duplicate_warning",
+        "",
+        [],
+        rich_message={
+            "blocks": [
+                {"type": "heading", "size": 2, "text": "Duplicate Warning"},
+                {"type": "paragraph", "text": "Previous client: {details}"},
+            ],
+            "is_rtl": False,
+        },
+    )
+    context = _context(repository)
+    duplicate_update = _update(
+        message_id=11,
+        update_id=101,
+        value="rich-123",
+        username="current_user",
+    )
+
+    asyncio.run(handle_group_message(duplicate_update, context))
+
+    context.bot._post.assert_awaited_once()
+    endpoint = context.bot._post.await_args.args[0]
+    data = context.bot._post.await_args.kwargs["data"]
+    assert endpoint == "sendRichMessage"
+    assert data["chat_id"] == duplicate_update.effective_chat.id
+    assert data["reply_parameters"] == {"message_id": 11}
+    assert data["rich_message"]["blocks"][1]["text"] == (
+        "Previous client: Deposit - @previous_user\\nGmail - old@example.com"
+    )
+    duplicate_update.effective_message.reply_text.assert_not_awaited()
+    record = repository.find_by_id("rich-123")
+    assert record["user"] == "@current_user"
+    assert record["occurrence_count"] == 2
+
 
 
 def test_duplicate_warning_uses_previous_record_across_groups(monkeypatch) -> None:
