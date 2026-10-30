@@ -185,6 +185,38 @@ def test_message_templates_round_trip(repository: IDRepository) -> None:
     }
 
 
+def test_native_rich_message_template_round_trip(repository: IDRepository) -> None:
+    rich_message = {
+        "blocks": [
+            {"type": "heading", "size": 2, "text": "Duplicate Warning"},
+            {"type": "paragraph", "text": "{details}"},
+        ],
+        "is_rtl": False,
+    }
+
+    repository.save_message_template(
+        "duplicate_warning",
+        "",
+        [],
+        rich_message=rich_message,
+    )
+
+    assert repository.get_message_template("duplicate_warning") == {
+        "key": "duplicate_warning",
+        "text": "",
+        "entities": [],
+        "rich_message": rich_message,
+    }
+
+    # Saving a regular text template clears an earlier RichMessage payload.
+    repository.save_message_template("duplicate_warning", "Plain warning", [])
+    assert repository.get_message_template("duplicate_warning") == {
+        "key": "duplicate_warning",
+        "text": "Plain warning",
+        "entities": [],
+    }
+
+
 def test_clear_id_records_does_not_delete_other_collections(
     repository: IDRepository,
 ) -> None:
