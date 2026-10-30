@@ -262,7 +262,7 @@ def test_forwarded_message_records_forwarder_not_original_author(monkeypatch) ->
 
     record = repository.find_by_id("forwarded-123")
     assert record["user"] == "@userB"
-    assert record["date"] == processing_time.replace(tzinfo=None)
+    assert record["date"] == datetime(2026, 10, 30, 8, 22)
 
 
 def test_real_message_user_takes_precedence_over_sender_chat(monkeypatch) -> None:
