@@ -1387,7 +1387,7 @@ async def handle_group_message(
             if isinstance(rich_warning, dict):
                 rendered_rich_warning = _render_rich_message_template(
                     rich_warning,
-                    {"details": "\\n".join(details)},
+                    {"details": "\n".join(details)},
                 )
                 await context.bot._post(
                     "sendRichMessage",
