@@ -201,6 +201,91 @@ def test_sender_chat_replaces_telegram_fake_from_user(monkeypatch) -> None:
     assert repository.user_records.count_documents({}) == 0
 
 
+
+def test_forwarded_message_records_forwarder_not_original_author(monkeypatch) -> None:
+    import handlers
+
+    monkeypatch.setenv("DISPLAY_TIMEZONE", "Asia/Bangkok")
+    processing_time = datetime(2026, 10, 30, 8, 22, tzinfo=timezone.utc)
+    monkeypatch.setattr(handlers, "utc_now", lambda: processing_time)
+    repository = _repository()
+    context = _context(repository)
+
+    first = _update(
+        message_id=700,
+        update_id=800,
+        value="forwarded-123",
+        username="userA",
+        sent_at=datetime(2026, 10, 29, 8, 0, tzinfo=timezone.utc),
+        chat_id=-1001,
+    )
+    asyncio.run(handle_group_message(first, context))
+
+    forwarded = _update(
+        message_id=701,
+        update_id=801,
+        value="forwarded-123",
+        username="userB",
+        sent_at=datetime(2026, 10, 29, 8, 0, tzinfo=timezone.utc),
+        chat_id=-1002,
+    )
+    original_author = SimpleNamespace(
+        id=42,
+        username="userA",
+        first_name="userA",
+        last_name="User",
+        is_bot=False,
+    )
+    # Telegram keeps the current sender in from_user and records the original
+    # author separately in forward_origin.sender_user.
+    forwarded.effective_message.forward_origin = SimpleNamespace(
+        type="user",
+        sender_user=original_author,
+    )
+    # Guard against accidentally falling back to the origin/old update user.
+    forwarded.effective_user = original_author
+    asyncio.run(handle_group_message(forwarded, context))
+
+    forwarded.effective_message.reply_text.assert_awaited_once()
+    warning = forwarded.effective_message.reply_text.await_args.args[0]
+    first_section = warning.split("Current:", maxsplit=1)[0]
+    current_section = warning.split("Current:", maxsplit=1)[1]
+    assert "@userA" in first_section
+    assert "2026-10-29" in first_section
+    assert "@userB" in current_section
+    assert "2026-10-30" in current_section
+
+    record = repository.find_by_id("forwarded-123")
+    assert record["user"] == "@userB"
+    assert record["date"] == processing_time.replace(tzinfo=None)
+
+
+def test_real_message_user_takes_precedence_over_sender_chat(monkeypatch) -> None:
+    import handlers
+
+    monkeypatch.setenv("DISPLAY_TIMEZONE", "Asia/Bangkok")
+    processing_time = datetime(2026, 10, 30, 8, 22, tzinfo=timezone.utc)
+    monkeypatch.setattr(handlers, "utc_now", lambda: processing_time)
+    repository = _repository()
+    context = _context(repository)
+
+    update = _update(
+        message_id=900,
+        update_id=1000,
+        value="real-sender-123",
+        username="userB",
+    )
+    update.effective_message.sender_chat = SimpleNamespace(
+        id=-300300,
+        username="source_channel",
+        title="Source Channel",
+    )
+    asyncio.run(handle_group_message(update, context))
+
+    record = repository.find_by_id("real-sender-123")
+    assert record["user"] == "@userB"
+
+
 def test_timestamp_date_uses_configured_local_timezone(monkeypatch) -> None:
     from handlers import _format_timestamp
 
