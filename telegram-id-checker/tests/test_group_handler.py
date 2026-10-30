@@ -91,26 +91,34 @@ def test_redelivered_group_message_is_processed_once() -> None:
 def test_same_id_in_a_new_group_message_is_still_a_duplicate() -> None:
     repository = _repository()
     context = _context(repository)
-    first_message = _update(message_id=10, update_id=100, value="123")
-    second_message = _update(message_id=11, update_id=101, value="123")
+    first_message = _update(
+        message_id=10, update_id=100, value="123", username="userA", gmail="a@example.com"
+    )
+    second_message = _update(
+        message_id=11, update_id=101, value="123", username="userB", gmail="b@example.com"
+    )
 
     asyncio.run(handle_group_message(first_message, context))
     asyncio.run(handle_group_message(second_message, context))
 
     record = repository.find_by_id("123")
     assert record["occurrence_count"] == 2
+    assert record["user"] == "@userB"
+    assert record["gmail"] == "b@example.com"
     second_message.effective_message.reply_text.assert_awaited_once()
     warning = second_message.effective_message.reply_text.await_args.args[0]
     assert warning.startswith(
         "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
         "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။"
     )
-    assert "Deposit - @tester" in warning
+    assert "Deposit - @userA" in warning
+    assert "Gmail - a@example.com" in warning
+    assert "b@example.com" not in warning
     assert "First Seen" not in warning
     assert "Current:" not in warning
 
 
-def test_duplicate_warning_uses_latest_sender_and_gmail_across_groups(monkeypatch) -> None:
+def test_duplicate_warning_uses_previous_record_across_groups(monkeypatch) -> None:
     import handlers
 
     monkeypatch.setenv("DISPLAY_TIMEZONE", "Asia/Bangkok")
@@ -145,14 +153,6 @@ def test_duplicate_warning_uses_latest_sender_and_gmail_across_groups(monkeypatc
             chat_id=chat_id,
             gmail=gmail,
         )
-        if index == 2:
-            update.effective_user = SimpleNamespace(
-                id=42,
-                username="userA",
-                first_name="userA",
-                last_name="User",
-                is_bot=False,
-            )
         asyncio.run(handle_group_message(update, context))
         if index == 1:
             update.effective_message.reply_text.assert_not_awaited()
@@ -162,23 +162,22 @@ def test_duplicate_warning_uses_latest_sender_and_gmail_across_groups(monkeypatc
 
     expected = [
         (
-            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
-            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
-            "Deposit - @userB\nGmail - Mimifentahun"
+            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\\n"
+            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\\n\\n"
+            "Deposit - @userA\\nGmail - old@example.com"
         ),
         (
-            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
-            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
-            "Deposit - @userC\nGmail - new@example.com"
+            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\\n"
+            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\\n\\n"
+            "Deposit - @userB\\nGmail - Mimifentahun"
         ),
         (
-            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
-            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
-            "Deposit - @userD"
+            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\\n"
+            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\\n\\n"
+            "Deposit - @userC\\nGmail - new@example.com"
         ),
     ]
     assert notifications == expected
-    assert all("First Seen" not in warning and "Current:" not in warning for warning in notifications)
 
     record = repository.find_by_id("rolling-123")
     assert record["user"] == "@userD"
@@ -188,7 +187,7 @@ def test_duplicate_warning_uses_latest_sender_and_gmail_across_groups(monkeypatc
     assert repository.id_records.count_documents({"id": "rolling-123"}) == 1
 
 
-def test_duplicate_warning_omits_gmail_when_the_field_is_absent(monkeypatch) -> None:
+def test_warning_uses_previous_gmail_then_clears_it_after_send(monkeypatch) -> None:
     import handlers
 
     repository = _repository()
@@ -215,13 +214,69 @@ def test_duplicate_warning_omits_gmail_when_the_field_is_absent(monkeypatch) -> 
         username="userB",
     )
     asyncio.run(handle_group_message(first, context))
+
+    records_at_send_time = []
+
+    async def inspect_record_before_send(*args, **kwargs):
+        records_at_send_time.append(repository.find_by_id("no-gmail-123"))
+
+    second.effective_message.reply_text.side_effect = inspect_record_before_send
     asyncio.run(handle_group_message(second, context))
 
     warning = second.effective_message.reply_text.await_args.args[0]
-    assert warning.endswith("Deposit - @userB")
-    assert "Gmail -" not in warning
-    assert repository.find_by_id("no-gmail-123")["user"] == "@userB"
-    assert "gmail" not in repository.find_by_id("no-gmail-123")
+    assert warning.endswith("Deposit - @userA\\nGmail - old@example.com")
+    assert "Deposit - @userB" not in warning
+    assert records_at_send_time == [
+        {
+            "id": "no-gmail-123",
+            "user": "@userA",
+            "date": datetime(2026, 10, 30, 8, 0),
+            "occurrence_count": 1,
+            "gmail": "old@example.com",
+        }
+    ]
+
+    final_record = repository.find_by_id("no-gmail-123")
+    assert final_record["user"] == "@userB"
+    assert final_record["occurrence_count"] == 2
+    assert "gmail" not in final_record
+
+
+def test_failed_duplicate_warning_does_not_rewrite_current_record(monkeypatch) -> None:
+    import handlers
+
+    repository = _repository()
+    context = _context(repository)
+    processing_times = iter(
+        [
+            datetime(2026, 10, 30, 8, 0, tzinfo=timezone.utc),
+            datetime(2026, 10, 30, 9, 0, tzinfo=timezone.utc),
+        ]
+    )
+    monkeypatch.setattr(handlers, "utc_now", lambda: next(processing_times))
+
+    first = _update(
+        message_id=401,
+        update_id=501,
+        value="failed-warning-123",
+        username="userA",
+        gmail="old@example.com",
+    )
+    second = _update(
+        message_id=402,
+        update_id=502,
+        value="failed-warning-123",
+        username="userB",
+        gmail="new@example.com",
+    )
+    asyncio.run(handle_group_message(first, context))
+    second.effective_message.reply_text.side_effect = RuntimeError("Telegram send failed")
+    asyncio.run(handle_group_message(second, context))
+
+    record = repository.find_by_id("failed-warning-123")
+    assert record["user"] == "@userA"
+    assert record["gmail"] == "old@example.com"
+    assert record["occurrence_count"] == 1
 
 
 def test_sender_chat_replaces_telegram_fake_from_user(monkeypatch) -> None:
