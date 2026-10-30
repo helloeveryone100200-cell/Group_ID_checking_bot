@@ -406,6 +406,53 @@ def _user_details(update: Update) -> tuple[str, str | None, str]:
     return str(user_id), getattr(user, "username", None), display_name or str(user_id)
 
 
+def _message_sender_details(
+    message: Any,
+    fallback_user: Any = None,
+) -> tuple[str, str | None, str, bool]:
+    """Resolve the sender attached to this exact group message.
+
+    Telegram may attach a synthetic from_user when a message is sent on
+    behalf of a group/channel. In that case sender_chat is authoritative.
+    The final boolean identifies a chat sender, which should not be registered
+    as an ordinary user.
+    """
+    sender_chat = getattr(message, "sender_chat", None)
+    if sender_chat is not None:
+        sender_id = getattr(sender_chat, "id", None)
+        if sender_id is None:
+            return "unknown", None, "Unknown sender chat", True
+        title = (
+            getattr(sender_chat, "title", None)
+            or getattr(sender_chat, "full_name", None)
+            or str(sender_id)
+        )
+        return (
+            str(sender_id),
+            getattr(sender_chat, "username", None),
+            title,
+            True,
+        )
+
+    sender = getattr(message, "from_user", None) or fallback_user
+    if sender is None:
+        return "unknown", None, "Unknown user", False
+    sender_id = getattr(sender, "id", None)
+    if sender_id is None:
+        return "unknown", None, "Unknown user", False
+    display_name = " ".join(
+        part
+        for part in [getattr(sender, "first_name", None), getattr(sender, "last_name", None)]
+        if part
+    ).strip()
+    return (
+        str(sender_id),
+        getattr(sender, "username", None),
+        display_name or str(sender_id),
+        False,
+    )
+
+
 def _chat_details(update: Update) -> tuple[str, str]:
     chat = update.effective_chat
     if chat is None:
@@ -416,10 +463,6 @@ def _chat_details(update: Update) -> tuple[str, str]:
 
 def _message_id(update: Update) -> str:
     return str(update.effective_message.message_id) if update.effective_message else "unknown"
-
-
-def _actor(username: str | None, display_name: str, user_id: str) -> str:
-    return f"@{username}" if username else (display_name or user_id)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -495,16 +538,6 @@ def _format_timestamp(value: datetime | None) -> str:
         # MongoDB commonly returns naive datetimes even when UTC was stored.
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(_display_timezone()).strftime("%Y-%m-%d")
-
-
-def _message_timestamp(message: Any) -> datetime:
-    """Use Telegram's original message time, normalized to UTC."""
-    value = getattr(message, "date", None)
-    if not isinstance(value, datetime):
-        return utc_now()
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 
 def _format_record(record: dict[str, Any], *, heading: str, occurrences_label: str) -> str:
@@ -1046,10 +1079,15 @@ async def handle_group_message(
         return
 
     repository: IDRepository = context.application.bot_data["repository"]
+    # Current means the time this bot actually checks the ID, not the
+    # timestamp inherited from an edited/forwarded Telegram message.
     observed_at = utc_now()
-    timestamp = _message_timestamp(message)
-    user_id, username, display_name = _user_details(update)
-    if user_id != "unknown":
+    timestamp = observed_at
+    user_id, username, display_name, is_chat_sender = _message_sender_details(
+        message,
+        update.effective_user,
+    )
+    if user_id != "unknown" and not is_chat_sender:
         try:
             repository.record_user(user_id, username, display_name, observed_at)
         except Exception:
@@ -1141,8 +1179,8 @@ async def handle_group_message(
             "id": parsed.value,
             "first_user": str(previous.get("user", "unknown")),
             "first_date": _format_timestamp(previous.get("date")),
-            "current_user": _actor(username, display_name, user_id),
-            "current_date": _format_timestamp(metadata.timestamp),
+            "current_user": str(result.record.get("user", "unknown")),
+            "current_date": _format_timestamp(result.record.get("date")),
             "occurrence_count": str(result.record.get("occurrence_count", 2)),
         },
     )
