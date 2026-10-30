@@ -78,25 +78,30 @@ python bot.py
 ```
 
 The bot creates a unique MongoDB index on `id_records.id` at startup. Each ID
-has exactly one `id_records` document containing only `id`, `user`,
-`date`, and `occurrence_count`. Duplicate checks atomically increment the
-existing record and replace its current user/date; no occurrence-history
-documents are created. Group messages that contain an ID are also claimed in
-the separate `processed_messages` collection using a unique
-`(chat_id, message_id)` index. This prevents a redelivered Telegram update
-from incrementing an ID twice.
+has exactly one `id_records` document containing `id`, `user`, `date`,
+`occurrence_count`, and the optional `gmail` field. Duplicate checks
+atomically increment the existing record and overwrite the current user/date
+and Gmail; when the latest message has no Gmail field, the prior Gmail value
+is removed. No occurrence-history or duplicate ID documents are created.
+Group messages that contain an ID are also claimed in the separate
+`processed_messages` collection using a unique `(chat_id, message_id)`
+index. This prevents a redelivered Telegram update from incrementing an ID
+twice.
 
-Duplicate warnings use a rolling comparison: `First Seen` displays the user
-and date stored before the current duplicate, while `Current` displays the
-person who sent the message into the monitored group and the time the bot
-checked it. For forwarded messages, the forwarder is the current sender;
-Telegram's `forward_origin` describes the original author and is not used as
-the current user. The current date is based on the bot's UTC processing
-timestamp and is formatted in `DISPLAY_TIMEZONE` (default `Asia/Bangkok`).
-For anonymous or send-as-chat messages, Telegram's synthetic bot user is
-ignored in favor of `sender_chat`; Telegram does not expose the real
-administrator behind an anonymous sender. After the warning is prepared, the
-ID record keeps the newest sender/date for the next duplicate.
+A duplicate warning appears for every later check of the same ID, including
+checks by the same user in the same group. The warning uses one compact format:
+the first line says the client has already arrived, followed by `Deposit`
+(the Telegram username of the latest sender) and, only when supplied, `Gmail`
+(the Gmail field parsed from that message). It does not show First Seen,
+Current, or prior-user details. For forwarded messages, the forwarder is the
+current sender; the original author in `forward_origin` is not used as the
+latest checker. For anonymous/send-as-chat messages, Telegram's synthetic bot
+user is ignored in favor of `sender_chat`; Telegram does not expose the real
+administrator behind an anonymous sender. A duplicate updates the existing
+ID document's user, date, and Gmail in place; a missing Gmail clears the
+previous user's Gmail. No extra ID history documents are created. Dates are
+stored from the bot's UTC check time and formatted in `DISPLAY_TIMEZONE`
+(default `Asia/Bangkok`).
 
 Run the tests:
 
@@ -169,10 +174,10 @@ with only `chat_id`, `chat_title`, and `last_seen`; it does not add fields to
 Admins can send normal text or Telegram custom/animated emoji directly after
 selecting `Welcome Message`, `Duplicate Warning`, or `Control Panel Message`.
 The bot stores Telegram message entities with the text, so an emoji ID does not
-need to be entered manually. Duplicate warning templates support these
-placeholders:
-`{id}`, `{first_user}`, `{first_date}`, `{current_user}`, `{current_date}`,
-and `{occurrence_count}`.
+need to be entered manually. Duplicate warning templates use the
+`{details}` placeholder, which is replaced with the latest sender's Deposit
+line and the optional Gmail line. Old saved First Seen / Current warning
+templates are automatically ignored in favor of the new compact layout.
 
 Users are registered when they use `/start` or send a message in a monitored
 group. Telegram only allows a bot to initiate a private conversation with a
