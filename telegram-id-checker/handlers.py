@@ -1070,7 +1070,11 @@ async def handle_group_message(
     }:
         return
 
-    if message.from_user is not None and message.from_user.is_bot:
+    if (
+        getattr(message, "sender_chat", None) is None
+        and message.from_user is not None
+        and message.from_user.is_bot
+    ):
         LOGGER.info(
             "Ignoring bot-authored group message chat_id=%s message_id=%s",
             chat.id,
