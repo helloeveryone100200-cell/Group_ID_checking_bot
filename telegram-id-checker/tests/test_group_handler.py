@@ -162,19 +162,19 @@ def test_duplicate_warning_uses_previous_record_across_groups(monkeypatch) -> No
 
     expected = [
         (
-            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\\n"
-            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\\n\\n"
-            "Deposit - @userA\\nGmail - old@example.com"
+            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
+            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
+            "Deposit - @userA\nGmail - old@example.com"
         ),
         (
-            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\\n"
-            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\\n\\n"
-            "Deposit - @userB\\nGmail - Mimifentahun"
+            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
+            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
+            "Deposit - @userB\nGmail - Mimifentahun"
         ),
         (
-            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\\n"
-            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\\n\\n"
-            "Deposit - @userC\\nGmail - new@example.com"
+            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
+            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
+            "Deposit - @userC\nGmail - new@example.com"
         ),
     ]
     assert notifications == expected
@@ -224,7 +224,7 @@ def test_warning_uses_previous_gmail_then_clears_it_after_send(monkeypatch) -> N
     asyncio.run(handle_group_message(second, context))
 
     warning = second.effective_message.reply_text.await_args.args[0]
-    assert warning.endswith("Deposit - @userA\\nGmail - old@example.com")
+    assert warning.endswith("Deposit - @userA\nGmail - old@example.com")
     assert "Deposit - @userB" not in warning
     assert records_at_send_time == [
         {
