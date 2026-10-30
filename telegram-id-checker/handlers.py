@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
+import weakref
 from datetime import datetime, time, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -42,6 +44,36 @@ CONTROL_PANEL_MESSAGE = (
 
 CLEAR_ID_RECORDS_MODE = "id_records"
 CLEAR_PROCESSED_MESSAGES_MODE = "processed_messages"
+
+# Serialize duplicate checks for the same ID within this bot process. Weak
+# values keep the registry from growing with every unique ID ever observed.
+_ID_PROCESSING_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
+
+
+def _id_processing_lock(id_value: str) -> asyncio.Lock:
+    lock = _ID_PROCESSING_LOCKS.get(id_value)
+    if lock is None:
+        lock = asyncio.Lock()
+        _ID_PROCESSING_LOCKS[id_value] = lock
+    return lock
+
+
+def _release_group_message_claim(
+    repository: IDRepository,
+    chat_id: str,
+    message_id: str,
+) -> None:
+    try:
+        repository.release_group_message(chat_id, message_id)
+    except Exception:
+        LOGGER.exception(
+            "Database error while releasing group message claim "
+            "chat_id=%s message_id=%s",
+            chat_id,
+            message_id,
+        )
 
 
 def _control_panel_markup() -> InlineKeyboardMarkup:
@@ -1169,63 +1201,96 @@ async def handle_group_message(
         timestamp=timestamp,
         gmail=gmail,
     )
-    try:
-        result = repository.record_occurrence(metadata)
-    except Exception:
+    # A per-ID lock prevents two messages for the same ID from reading the
+    # same previous state and then overwriting one another in this process.
+    async with _id_processing_lock(parsed.value):
         try:
-            repository.release_group_message(chat_id, message_id)
+            previous_record = repository.find_by_id(parsed.value)
         except Exception:
-            LOGGER.exception(
-                "Database error while releasing group message claim "
-                "chat_id=%s message_id=%s",
-                chat_id,
-                message_id,
-            )
-        LOGGER.exception("Database error while recording an ID")
-        return
+            _release_group_message_claim(repository, chat_id, message_id)
+            LOGGER.exception("Database error while reading an existing ID record")
+            return
 
-    if result.is_new:
-        LOGGER.info("New ID detected in chat_id=%s", chat.id)
-        return
+        record_updated = False
+        if previous_record is None:
+            # First sighting: store the ID without sending a duplicate warning.
+            try:
+                result = repository.record_occurrence(metadata)
+            except Exception:
+                _release_group_message_claim(repository, chat_id, message_id)
+                LOGGER.exception("Database error while recording a new ID")
+                return
 
-    # Old saved First Seen / Current templates are no longer valid. Keep
-    # custom warning text only when it opts into the new {details} placeholder.
-    warning_template = _message_template(
-        repository,
-        DUPLICATE_WARNING_MESSAGE_KEY,
-        DUPLICATE_WARNING_TEMPLATE,
-    )
-    saved_warning_text = warning_template["text"]
-    legacy_warning_markers = (
-        "First Seen:",
-        "Current:",
-        "{first_user}",
-        "{first_date}",
-        "{current_user}",
-        "{current_date}",
-    )
-    if (
-        "{details}" not in saved_warning_text
-        or any(marker in saved_warning_text for marker in legacy_warning_markers)
-    ):
-        warning_template = {"text": DUPLICATE_WARNING_TEMPLATE, "entities": []}
+            if result.is_new:
+                LOGGER.info("New ID detected in chat_id=%s", chat.id)
+                return
 
-    details: list[str] = []
-    if username:
-        details.append(f"Deposit - @{username.lstrip('@')}")
-    if gmail:
-        details.append(f"Gmail - {gmail}")
-    warning, warning_entities = _render_message_template(
-        warning_template["text"],
-        warning_template["entities"],
-        {"details": "\n".join(details)},
-    )
-    try:
-        await message.reply_text(warning, entities=warning_entities)
+            # Recovery path for an ID inserted concurrently by another process.
+            # record_occurrence has already updated it, but its atomic result
+            # still gives us the record that existed immediately beforehand.
+            previous_record = result.previous_record or {}
+            record_updated = True
+
+        # Build the warning exclusively from the record that existed before
+        # this submission. In particular, never use this message's Gmail here.
+        warning_template = _message_template(
+            repository,
+            DUPLICATE_WARNING_MESSAGE_KEY,
+            DUPLICATE_WARNING_TEMPLATE,
+        )
+        saved_warning_text = warning_template["text"]
+        legacy_warning_markers = (
+            "First Seen:",
+            "Current:",
+            "{first_user}",
+            "{first_date}",
+            "{current_user}",
+            "{current_date}",
+        )
+        if (
+            "{details}" not in saved_warning_text
+            or any(marker in saved_warning_text for marker in legacy_warning_markers)
+        ):
+            warning_template = {"text": DUPLICATE_WARNING_TEMPLATE, "entities": []}
+
+        details: list[str] = []
+        previous_user = previous_record.get("user")
+        if isinstance(previous_user, str) and previous_user.strip():
+            details.append(f"Deposit - {previous_user.strip()}")
+        previous_gmail = previous_record.get("gmail")
+        if previous_gmail is not None:
+            gmail_value = str(previous_gmail).strip()
+            if gmail_value:
+                details.append(f"Gmail - {gmail_value}")
+
+        warning, warning_entities = _render_message_template(
+            warning_template["text"],
+            warning_template["entities"],
+            {"details": "\\n".join(details)},
+        )
+
+        try:
+            await message.reply_text(warning, entities=warning_entities)
+        except Exception:
+            # Preserve the previous ID state unless the warning was sent. The
+            # processed-message claim remains, avoiding duplicate alerts if
+            # Telegram's response to the send request was ambiguous.
+            LOGGER.exception("Telegram error while sending duplicate warning")
+            return
+
+        if not record_updated:
+            # Only after Telegram accepts the warning do we replace the latest
+            # user/date/Gmail and increment occurrence_count in the same ID row.
+            try:
+                repository.record_occurrence(metadata)
+            except Exception:
+                LOGGER.exception(
+                    "Database error while updating ID after duplicate warning "
+                    "was sent"
+                )
+                return
+
         LOGGER.info("Duplicate detected in chat_id=%s", chat.id)
-    except Exception:
-        LOGGER.exception("Telegram error while sending duplicate warning")
-
 
 async def check_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _is_admin(update, context):
