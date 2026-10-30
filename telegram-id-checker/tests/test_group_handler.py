@@ -145,8 +145,13 @@ def test_duplicate_warning_keeps_article_formatting_entities() -> None:
 
 def test_duplicate_warning_sends_native_rich_message_and_renders_details() -> None:
     repository = _repository()
-    repository.record_occurrence(
-        _metadata("rich-123", "first", username="previous_user", gmail="old@example.com")
+    context = _context(repository)
+    first_update = _update(
+        message_id=10,
+        update_id=100,
+        value="rich-123",
+        username="previous_user",
+        gmail="old@example.com",
     )
     repository.save_message_template(
         "duplicate_warning",
@@ -160,7 +165,6 @@ def test_duplicate_warning_sends_native_rich_message_and_renders_details() -> No
             "is_rtl": False,
         },
     )
-    context = _context(repository)
     duplicate_update = _update(
         message_id=11,
         update_id=101,
@@ -168,6 +172,7 @@ def test_duplicate_warning_sends_native_rich_message_and_renders_details() -> No
         username="current_user",
     )
 
+    asyncio.run(handle_group_message(first_update, context))
     asyncio.run(handle_group_message(duplicate_update, context))
 
     context.bot._post.assert_awaited_once()
