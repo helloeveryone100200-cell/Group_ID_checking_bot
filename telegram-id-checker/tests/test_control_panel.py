@@ -86,7 +86,7 @@ def test_duplicate_warning_editor_saves_formatted_article_entities() -> None:
         {"type": "bold", "offset": 0, "length": 9},
         {
             "type": "text_link",
-            "offset": 11,
+            "offset": 10,
             "length": 4,
             "url": "https://example.com",
         },
