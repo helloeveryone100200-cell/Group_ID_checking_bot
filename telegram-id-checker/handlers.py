@@ -14,7 +14,7 @@ from telegram.constants import ChatType
 from telegram.ext import ContextTypes
 
 from database import IDRepository, OccurrenceMetadata, utc_now
-from parser import parse_id
+from parser import extract_gmail, parse_id
 
 LOGGER = logging.getLogger(__name__)
 
@@ -25,23 +25,15 @@ WELCOME_MESSAGE = (
 )
 
 DUPLICATE_WARNING_TEMPLATE = (
-    "⚠️ DUPLICATE ID\n\n"
-    "ID: {id}\n\n"
-    "First Seen:\n"
-    "👤 {first_user}\n"
-    "📅 {first_date}\n\n"
-    "Current:\n"
-    "👤 {current_user}\n"
-    "📅 {current_date}\n\n"
-    "📊 Total occurrences: {occurrence_count}"
+    "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
+    "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
+    "{details}"
 )
 
 WELCOME_MESSAGE_KEY = "welcome"
 DUPLICATE_WARNING_MESSAGE_KEY = "duplicate_warning"
 CONTROL_PANEL_MESSAGE_KEY = "control_panel"
-MESSAGE_PLACEHOLDER_PATTERN = re.compile(
-    r"\{(id|first_user|first_date|current_user|current_date|occurrence_count)\}"
-)
+MESSAGE_PLACEHOLDER_PATTERN = re.compile(r"\{(details)\}")
 
 CONTROL_PANEL_MESSAGE = (
     "🔐 CONTROL PANEL\n\n"
@@ -385,9 +377,8 @@ def _message_edit_prompt(key: str) -> str:
         "ပြောင်းလဲလိုသော duplicate warning template ကို ပို့ပါ။ "
         "စာသားနဲ့ Telegram animated/custom emoji ကို တစ်ခါတည်းထည့်နိုင်ပါတယ်။\n"
         "Emoji ID ကို ကိုယ်တိုင်ထည့်စရာမလိုပါ။\n\n"
-        "အသုံးပြုနိုင်သော placeholders:\n"
-        "{id}, {first_user}, {first_date}, {current_user}, "
-        "{current_date}, {occurrence_count}"
+        "နောက်ဆုံးစစ်ဆေးသူနဲ့ Gmail အချက်အလက် ထည့်လိုပါက {details} ကို သုံးပါ။\n"
+        "ဒီ placeholder ထဲမှာ Deposit နဲ့ Gmail လိုင်းတွေကို အလိုအလျောက် ထည့်ပေးပါမယ်။"
     )
 
 
@@ -1132,6 +1123,7 @@ async def handle_group_message(
 
     text = message.text or message.caption
     parsed = parse_id(text)
+    gmail = extract_gmail(text)
     if parsed.ambiguous:
         LOGGER.warning(
             "Ambiguous ID headers ignored in chat_id=%s message_id=%s",
@@ -1175,6 +1167,7 @@ async def handle_group_message(
         username=username,
         display_name=display_name,
         timestamp=timestamp,
+        gmail=gmail,
     )
     try:
         result = repository.record_occurrence(metadata)
@@ -1195,23 +1188,37 @@ async def handle_group_message(
         LOGGER.info("New ID detected in chat_id=%s", chat.id)
         return
 
-    previous = result.previous_record or {}
+    # Old saved First Seen / Current templates are no longer valid. Keep
+    # custom warning text only when it opts into the new {details} placeholder.
     warning_template = _message_template(
         repository,
         DUPLICATE_WARNING_MESSAGE_KEY,
         DUPLICATE_WARNING_TEMPLATE,
     )
+    saved_warning_text = warning_template["text"]
+    legacy_warning_markers = (
+        "First Seen:",
+        "Current:",
+        "{first_user}",
+        "{first_date}",
+        "{current_user}",
+        "{current_date}",
+    )
+    if (
+        "{details}" not in saved_warning_text
+        or any(marker in saved_warning_text for marker in legacy_warning_markers)
+    ):
+        warning_template = {"text": DUPLICATE_WARNING_TEMPLATE, "entities": []}
+
+    details: list[str] = []
+    if username:
+        details.append(f"Deposit - @{username.lstrip('@')}")
+    if gmail:
+        details.append(f"Gmail - {gmail}")
     warning, warning_entities = _render_message_template(
         warning_template["text"],
         warning_template["entities"],
-        {
-            "id": parsed.value,
-            "first_user": str(previous.get("user", "unknown")),
-            "first_date": _format_timestamp(previous.get("date")),
-            "current_user": str(result.record.get("user", "unknown")),
-            "current_date": _format_timestamp(result.record.get("date")),
-            "occurrence_count": str(result.record.get("occurrence_count", 2)),
-        },
+        {"details": "\n".join(details)},
     )
     try:
         await message.reply_text(warning, entities=warning_entities)
