@@ -13,6 +13,7 @@ def _metadata(
     *,
     username: str = "tester",
     timestamp: datetime | None = None,
+    gmail: str | None = None,
 ) -> OccurrenceMetadata:
     return OccurrenceMetadata(
         id=value,
@@ -23,6 +24,7 @@ def _metadata(
         username=username,
         display_name="Test User",
         timestamp=timestamp or datetime.now(timezone.utc),
+        gmail=gmail,
     )
 
 
@@ -201,3 +203,57 @@ def test_clear_id_records_does_not_delete_other_collections(
     assert repository.id_records.count_documents({}) == 0
     assert repository.find_group("-1001") is not None
     assert repository.get_message_template("welcome") is not None
+
+
+
+def test_latest_duplicate_rewrites_gmail_in_the_same_id_record(
+    repository: IDRepository,
+) -> None:
+    repository.record_occurrence(
+        _metadata("gmail-123", "1", username="userA", gmail="old@example.com")
+    )
+    duplicate = repository.record_occurrence(
+        _metadata("gmail-123", "2", username="userB", gmail="Mimifentahun")
+    )
+
+    assert duplicate.is_new is False
+    assert duplicate.record["user"] == "@userB"
+    assert duplicate.record["gmail"] == "Mimifentahun"
+    assert repository.id_records.count_documents({"id": "gmail-123"}) == 1
+    assert repository.find_by_id("gmail-123")["gmail"] == "Mimifentahun"
+
+
+def test_missing_gmail_clears_previous_users_gmail(
+    repository: IDRepository,
+) -> None:
+    repository.record_occurrence(
+        _metadata("gmail-clear-123", "1", username="userA", gmail="old@example.com")
+    )
+    duplicate = repository.record_occurrence(
+        _metadata("gmail-clear-123", "2", username="userB", gmail=None)
+    )
+
+    record = repository.find_by_id("gmail-clear-123")
+    assert duplicate.is_new is False
+    assert record["user"] == "@userB"
+    assert "gmail" not in record
+    assert repository.id_records.count_documents({"id": "gmail-clear-123"}) == 1
+
+
+def test_migration_preserves_current_gmail_field(repository: IDRepository) -> None:
+    repository.id_records.insert_one(
+        {
+            "id": "gmail-legacy",
+            "user": "@latest",
+            "date": datetime(2026, 10, 30, tzinfo=timezone.utc),
+            "occurrence_count": 3,
+            "gmail": "latest@example.com",
+            "obsolete_field": "remove-me",
+        }
+    )
+
+    repository.connect()
+    record = repository.find_by_id("gmail-legacy")
+
+    assert record["gmail"] == "latest@example.com"
+    assert set(record) == {"id", "user", "date", "occurrence_count", "gmail"}
