@@ -1266,7 +1266,7 @@ async def handle_group_message(
         warning, warning_entities = _render_message_template(
             warning_template["text"],
             warning_template["entities"],
-            {"details": "\\n".join(details)},
+            {"details": "\n".join(details)},
         )
 
         try:
