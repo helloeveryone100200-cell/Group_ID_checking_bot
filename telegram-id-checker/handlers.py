@@ -1351,20 +1351,21 @@ async def handle_group_message(
             DUPLICATE_WARNING_MESSAGE_KEY,
             DUPLICATE_WARNING_TEMPLATE,
         )
-        saved_warning_text = warning_template["text"]
-        legacy_warning_markers = (
-            "First Seen:",
-            "Current:",
-            "{first_user}",
-            "{first_date}",
-            "{current_user}",
-            "{current_date}",
-        )
-        if (
-            "{details}" not in saved_warning_text
-            or any(marker in saved_warning_text for marker in legacy_warning_markers)
-        ):
-            warning_template = {"text": DUPLICATE_WARNING_TEMPLATE, "entities": []}
+        if not isinstance(warning_template.get("rich_message"), dict):
+            saved_warning_text = warning_template["text"]
+            legacy_warning_markers = (
+                "First Seen:",
+                "Current:",
+                "{first_user}",
+                "{first_date}",
+                "{current_user}",
+                "{current_date}",
+            )
+            if (
+                "{details}" not in saved_warning_text
+                or any(marker in saved_warning_text for marker in legacy_warning_markers)
+            ):
+                warning_template = {"text": DUPLICATE_WARNING_TEMPLATE, "entities": []}
 
         details: list[str] = []
         previous_user = previous_record.get("user")
