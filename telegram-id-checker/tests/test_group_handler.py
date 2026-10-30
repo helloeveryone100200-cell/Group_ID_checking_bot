@@ -187,6 +187,7 @@ def test_sender_chat_replaces_telegram_fake_from_user(monkeypatch) -> None:
         value="chat-sender-123",
         username="nobody_to_him_19367074030",
     )
+    update.effective_message.from_user.is_bot = True
     update.effective_message.sender_chat = SimpleNamespace(
         id=-200200,
         username="source_channel",
