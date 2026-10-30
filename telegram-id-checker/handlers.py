@@ -410,13 +410,36 @@ def _message_sender_details(
     message: Any,
     fallback_user: Any = None,
 ) -> tuple[str, str | None, str, bool]:
-    """Resolve the sender attached to this exact group message.
+    """Resolve the person who sent this message, or its chat sender.
 
-    Telegram may attach a synthetic from_user when a message is sent on
-    behalf of a group/channel. In that case sender_chat is authoritative.
-    The final boolean identifies a chat sender, which should not be registered
-    as an ordinary user.
+    For forwarded messages, Message.from_user is the user who forwarded the
+    message; forward_origin describes the original author and must not replace
+    the current sender. When Telegram supplies a synthetic bot user together
+    with sender_chat for anonymous/send-as-chat posts, sender_chat is used.
     """
+    sender = getattr(message, "from_user", None)
+
+    # A non-bot from_user is the actual author of this group message. Prefer
+    # it even if sender_chat is also present, so the current human sender is
+    # not replaced by an origin/channel/chat identity.
+    if sender is not None and not getattr(sender, "is_bot", False):
+        sender_id = getattr(sender, "id", None)
+        if sender_id is not None:
+            display_name = " ".join(
+                part
+                for part in [
+                    getattr(sender, "first_name", None),
+                    getattr(sender, "last_name", None),
+                ]
+                if part
+            ).strip()
+            return (
+                str(sender_id),
+                getattr(sender, "username", None),
+                display_name or str(sender_id),
+                False,
+            )
+
     sender_chat = getattr(message, "sender_chat", None)
     if sender_chat is not None:
         sender_id = getattr(sender_chat, "id", None)
@@ -434,8 +457,10 @@ def _message_sender_details(
             True,
         )
 
-    sender = getattr(message, "from_user", None) or fallback_user
-    if sender is None:
+    # Fallback is only used if the Message object has no sender. Never let
+    # Telegram's synthetic bot account become the displayed current user.
+    sender = sender or fallback_user
+    if sender is None or getattr(sender, "is_bot", False):
         return "unknown", None, "Unknown user", False
     sender_id = getattr(sender, "id", None)
     if sender_id is None:
