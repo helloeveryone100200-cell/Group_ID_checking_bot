@@ -49,7 +49,7 @@ def _update(
     )
     content = message_text if message_text is not None else f"ID: {value}"
     if message_text is None and gmail is not None:
-        content += f"\\nGmail - {gmail}"
+        content += f"\nGmail - {gmail}"
     message = SimpleNamespace(
         from_user=sender,
         message_id=message_id,
@@ -102,7 +102,7 @@ def test_same_id_in_a_new_group_message_is_still_a_duplicate() -> None:
     second_message.effective_message.reply_text.assert_awaited_once()
     warning = second_message.effective_message.reply_text.await_args.args[0]
     assert warning.startswith(
-        "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\\n"
+        "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
         "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။"
     )
     assert "Deposit - @tester" in warning
@@ -162,18 +162,18 @@ def test_duplicate_warning_uses_latest_sender_and_gmail_across_groups(monkeypatc
 
     expected = [
         (
-            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\\n"
-            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\\n\\n"
-            "Deposit - @userB\\nGmail - Mimifentahun"
+            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
+            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
+            "Deposit - @userB\nGmail - Mimifentahun"
         ),
         (
-            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\\n"
-            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\\n\\n"
-            "Deposit - @userC\\nGmail - new@example.com"
+            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
+            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
+            "Deposit - @userC\nGmail - new@example.com"
         ),
         (
-            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\\n"
-            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\\n\\n"
+            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
+            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
             "Deposit - @userD"
         ),
     ]
