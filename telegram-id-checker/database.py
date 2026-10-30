@@ -25,6 +25,7 @@ class OccurrenceMetadata:
     username: str | None
     display_name: str
     timestamp: datetime
+    gmail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -225,7 +226,7 @@ class IDRepository:
 
     def _migrate_legacy_records(self) -> None:
         """Keep existing records while reducing them to the current schema."""
-        allowed_fields = {"_id", "id", "user", "date", "occurrence_count"}
+        allowed_fields = {"_id", "id", "user", "date", "occurrence_count", "gmail"}
         migrated = 0
         for record in self.id_records.find({}):
             if (
@@ -266,6 +267,8 @@ class IDRepository:
                 "date": date,
                 "occurrence_count": occurrence_count,
             }
+            if record.get("gmail"):
+                clean_record["gmail"] = str(record["gmail"])
             self.id_records.replace_one({"_id": record["_id"]}, clean_record)
             migrated += 1
 
@@ -280,12 +283,15 @@ class IDRepository:
 
     @staticmethod
     def _record_from_metadata(metadata: OccurrenceMetadata) -> dict[str, Any]:
-        return {
+        record = {
             "id": metadata.id,
             "user": IDRepository._user_from_metadata(metadata),
             "date": metadata.timestamp,
             "occurrence_count": 1,
         }
+        if metadata.gmail:
+            record["gmail"] = metadata.gmail
+        return record
 
     def record_occurrence(self, metadata: OccurrenceMetadata) -> RecordResult:
         """Create a record or atomically replace its current user and date."""
@@ -293,15 +299,21 @@ class IDRepository:
         try:
             self.id_records.insert_one(primary)
         except DuplicateKeyError:
+            update: dict[str, Any] = {
+                "$set": {
+                    "user": primary["user"],
+                    "date": primary["date"],
+                },
+                "$inc": {"occurrence_count": 1},
+            }
+            if primary.get("gmail"):
+                update["$set"]["gmail"] = primary["gmail"]
+            else:
+                # Gmail belongs to the latest check only, never the prior user.
+                update["$unset"] = {"gmail": ""}
             previous = self.id_records.find_one_and_update(
                 {"id": metadata.id},
-                {
-                    "$set": {
-                        "user": primary["user"],
-                        "date": primary["date"],
-                    },
-                    "$inc": {"occurrence_count": 1},
-                },
+                update,
                 projection={"_id": 0},
                 return_document=ReturnDocument.BEFORE,
             )
@@ -316,6 +328,8 @@ class IDRepository:
                 "date": primary["date"],
                 "occurrence_count": occurrence_count,
             }
+            if primary.get("gmail"):
+                updated["gmail"] = primary["gmail"]
             previous["occurrence_count"] = int(previous.get("occurrence_count", 1))
             return RecordResult(
                 is_new=False,

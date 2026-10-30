@@ -13,6 +13,12 @@ _ID_HEADER = re.compile(
     flags=re.IGNORECASE | re.MULTILINE,
 )
 
+_GMAIL_HEADER = re.compile(
+    r"^[ \t]*gmail[ \t]*(?::|-|=)[ \t]*(?P<value>.*?)[ \t]*$",
+    flags=re.IGNORECASE | re.MULTILINE,
+)
+_EMPTY_FIELD_VALUES = {"", "no", "none", "n/a", "na", "not available", "not provided", "-"}
+
 
 @dataclass(frozen=True)
 class ParsedID:
@@ -43,3 +49,19 @@ def parse_id(text: str | None) -> ParsedID:
 def extract_id(text: str) -> str | None:
     """Return one valid standalone ID, or None when it must be ignored."""
     return parse_id(text).value
+
+
+def extract_gmail(text: str | None) -> str | None:
+    """Extract one standalone Gmail field; ignore empty or negative values."""
+    if not text:
+        return None
+
+    matches = list(_GMAIL_HEADER.finditer(text))
+    # Multiple Gmail headers are ambiguous; do not guess which one is current.
+    if len(matches) != 1:
+        return None
+
+    value = matches[0].group("value").strip()
+    if value.casefold() in _EMPTY_FIELD_VALUES:
+        return None
+    return value

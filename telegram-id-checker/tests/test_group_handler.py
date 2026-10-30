@@ -37,6 +37,8 @@ def _update(
     username: str = "tester",
     sent_at: datetime | None = None,
     chat_id: int = -1001,
+    gmail: str | None = None,
+    message_text: str | None = None,
 ) -> SimpleNamespace:
     sender = SimpleNamespace(
         id=42,
@@ -45,11 +47,14 @@ def _update(
         last_name="User",
         is_bot=is_bot,
     )
+    content = message_text if message_text is not None else f"ID: {value}"
+    if message_text is None and gmail is not None:
+        content += f"\nGmail - {gmail}"
     message = SimpleNamespace(
         from_user=sender,
         message_id=message_id,
         date=sent_at or datetime.now(timezone.utc),
-        text=f"ID: {value}",
+        text=content,
         caption=None,
         reply_text=AsyncMock(),
     )
@@ -95,9 +100,17 @@ def test_same_id_in_a_new_group_message_is_still_a_duplicate() -> None:
     record = repository.find_by_id("123")
     assert record["occurrence_count"] == 2
     second_message.effective_message.reply_text.assert_awaited_once()
+    warning = second_message.effective_message.reply_text.await_args.args[0]
+    assert warning.startswith(
+        "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
+        "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။"
+    )
+    assert "Deposit - @tester" in warning
+    assert "First Seen" not in warning
+    assert "Current:" not in warning
 
 
-def test_first_seen_rolls_across_groups_and_current_uses_check_time(monkeypatch) -> None:
+def test_duplicate_warning_uses_latest_sender_and_gmail_across_groups(monkeypatch) -> None:
     import handlers
 
     monkeypatch.setenv("DISPLAY_TIMEZONE", "Asia/Bangkok")
@@ -115,16 +128,14 @@ def test_first_seen_rolls_across_groups_and_current_uses_check_time(monkeypatch)
     monkeypatch.setattr(handlers, "utc_now", lambda: next(processing_times))
 
     events = [
-        ("userA", -1001, datetime(2026, 10, 29, 15, 19, tzinfo=timezone.utc)),
-        # Simulate a message whose Telegram message.date is stale; Current must
-        # still reflect when this bot actually checked the ID in the new group.
-        ("userB", -1002, datetime(2026, 10, 29, 15, 19, tzinfo=timezone.utc)),
-        ("userC", -1003, datetime(2026, 10, 31, 8, 0, tzinfo=timezone.utc)),
-        ("userD", -1004, datetime(2026, 11, 1, 8, 0, tzinfo=timezone.utc)),
+        ("userA", -1001, datetime(2026, 10, 29, 15, 19, tzinfo=timezone.utc), "old@example.com"),
+        ("userB", -1002, datetime(2026, 10, 29, 15, 19, tzinfo=timezone.utc), "Mimifentahun"),
+        ("userC", -1003, datetime(2026, 10, 31, 8, 0, tzinfo=timezone.utc), "new@example.com"),
+        ("userD", -1004, datetime(2026, 11, 1, 8, 0, tzinfo=timezone.utc), None),
     ]
     notifications = []
 
-    for index, (username, chat_id, sent_at) in enumerate(events, start=1):
+    for index, (username, chat_id, sent_at, gmail) in enumerate(events, start=1):
         update = _update(
             message_id=100 + index,
             update_id=200 + index,
@@ -132,6 +143,7 @@ def test_first_seen_rolls_across_groups_and_current_uses_check_time(monkeypatch)
             username=username,
             sent_at=sent_at,
             chat_id=chat_id,
+            gmail=gmail,
         )
         if index == 2:
             update.effective_user = SimpleNamespace(
@@ -148,28 +160,68 @@ def test_first_seen_rolls_across_groups_and_current_uses_check_time(monkeypatch)
             update.effective_message.reply_text.assert_awaited_once()
             notifications.append(update.effective_message.reply_text.await_args.args[0])
 
-    expectations = [
-        ("@userA", "2026-10-29", "@userB", "2026-10-30", "Total occurrences: 2"),
-        ("@userB", "2026-10-30", "@userC", "2026-10-31", "Total occurrences: 3"),
-        ("@userC", "2026-10-31", "@userD", "2026-11-01", "Total occurrences: 4"),
+    expected = [
+        (
+            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
+            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
+            "Deposit - @userB\nGmail - Mimifentahun"
+        ),
+        (
+            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
+            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
+            "Deposit - @userC\nGmail - new@example.com"
+        ),
+        (
+            "⚠️ ဤ client သည် ရောက်ပြီးသားဖြစ်ပါသည်။⚠️\n"
+            "အောက်တွင်ဖော်ပြထားသည်။ဘယ်အဆင့်ရောက်နေလဲမေးမြန်းပါ။\n\n"
+            "Deposit - @userD"
+        ),
     ]
-    for warning, (previous_user, previous_date, current_user, current_date, count) in zip(
-        notifications, expectations, strict=True
-    ):
-        first_seen_section = warning.split("Current:", maxsplit=1)[0]
-        current_section = warning.split("Current:", maxsplit=1)[1]
-        assert "First Seen:" in first_seen_section
-        assert previous_user in first_seen_section
-        assert previous_date in first_seen_section
-        assert current_user in current_section
-        assert current_date in current_section
-        assert count in warning
+    assert notifications == expected
+    assert all("First Seen" not in warning and "Current:" not in warning for warning in notifications)
 
     record = repository.find_by_id("rolling-123")
     assert record["user"] == "@userD"
     assert record["date"] == datetime(2026, 11, 1, 8, 0)
     assert record["occurrence_count"] == 4
-    assert set(record) == {"id", "user", "date", "occurrence_count"}
+    assert "gmail" not in record
+    assert repository.id_records.count_documents({"id": "rolling-123"}) == 1
+
+
+def test_duplicate_warning_omits_gmail_when_the_field_is_absent(monkeypatch) -> None:
+    import handlers
+
+    repository = _repository()
+    context = _context(repository)
+    processing_times = iter(
+        [
+            datetime(2026, 10, 30, 8, 0, tzinfo=timezone.utc),
+            datetime(2026, 10, 30, 9, 0, tzinfo=timezone.utc),
+        ]
+    )
+    monkeypatch.setattr(handlers, "utc_now", lambda: next(processing_times))
+
+    first = _update(
+        message_id=301,
+        update_id=401,
+        value="no-gmail-123",
+        username="userA",
+        gmail="old@example.com",
+    )
+    second = _update(
+        message_id=302,
+        update_id=402,
+        value="no-gmail-123",
+        username="userB",
+    )
+    asyncio.run(handle_group_message(first, context))
+    asyncio.run(handle_group_message(second, context))
+
+    warning = second.effective_message.reply_text.await_args.args[0]
+    assert warning.endswith("Deposit - @userB")
+    assert "Gmail -" not in warning
+    assert repository.find_by_id("no-gmail-123")["user"] == "@userB"
+    assert "gmail" not in repository.find_by_id("no-gmail-123")
 
 
 def test_sender_chat_replaces_telegram_fake_from_user(monkeypatch) -> None:
@@ -253,12 +305,9 @@ def test_forwarded_message_records_forwarder_not_original_author(monkeypatch) ->
 
     forwarded.effective_message.reply_text.assert_awaited_once()
     warning = forwarded.effective_message.reply_text.await_args.args[0]
-    first_section = warning.split("Current:", maxsplit=1)[0]
-    current_section = warning.split("Current:", maxsplit=1)[1]
-    assert "@userA" in first_section
-    assert "2026-10-29" in first_section
-    assert "@userB" in current_section
-    assert "2026-10-30" in current_section
+    assert warning.endswith("Deposit - @userB")
+    assert "First Seen" not in warning
+    assert "Current:" not in warning
 
     record = repository.find_by_id("forwarded-123")
     assert record["user"] == "@userB"
