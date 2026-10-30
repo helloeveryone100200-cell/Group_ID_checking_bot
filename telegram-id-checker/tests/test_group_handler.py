@@ -177,7 +177,7 @@ def test_duplicate_warning_sends_native_rich_message_and_renders_details() -> No
     assert data["chat_id"] == duplicate_update.effective_chat.id
     assert data["reply_parameters"] == {"message_id": 11}
     assert data["rich_message"]["blocks"][1]["text"] == (
-        "Previous client: Deposit - @previous_user\\nGmail - old@example.com"
+        "Previous client: Deposit - @previous_user\nGmail - old@example.com"
     )
     duplicate_update.effective_message.reply_text.assert_not_awaited()
     record = repository.find_by_id("rich-123")
