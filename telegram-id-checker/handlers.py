@@ -273,7 +273,16 @@ def _message_template(
     except Exception:
         LOGGER.exception("Database error while loading message template: %s", key)
         return {"text": default_text, "entities": []}
-    if not saved or not isinstance(saved.get("text"), str):
+    if not saved:
+        return {"text": default_text, "entities": []}
+    rich_message = saved.get("rich_message")
+    if isinstance(rich_message, dict) and isinstance(rich_message.get("blocks"), list):
+        return {
+            "text": saved.get("text") if isinstance(saved.get("text"), str) else "",
+            "entities": [],
+            "rich_message": rich_message,
+        }
+    if not isinstance(saved.get("text"), str):
         return {"text": default_text, "entities": []}
     entities = saved.get("entities")
     return {
@@ -288,6 +297,54 @@ def _control_panel_template(repository: IDRepository) -> dict[str, Any]:
         CONTROL_PANEL_MESSAGE_KEY,
         CONTROL_PANEL_MESSAGE,
     )
+
+
+def _incoming_rich_message(message: Any) -> dict[str, Any] | None:
+    """Read Bot API 10.1 RichMessage preserved by PTB as an unknown API field."""
+    rich_message = getattr(message, "rich_message", None)
+    if not isinstance(rich_message, dict):
+        api_kwargs = getattr(message, "api_kwargs", None)
+        if api_kwargs is not None:
+            rich_message = api_kwargs.get("rich_message")
+    if (
+        isinstance(rich_message, dict)
+        and isinstance(rich_message.get("blocks"), list)
+    ):
+        return rich_message
+    return None
+
+
+_RICH_TEXT_PLACEHOLDER_FIELDS = frozenset(
+    {"text", "caption", "credit", "label", "title", "summary"}
+)
+
+
+def _render_rich_message_template(
+    rich_message: dict[str, Any],
+    values: dict[str, str],
+) -> dict[str, Any]:
+    """Replace placeholders only in visible rich-text fields; preserve block metadata."""
+    def visit(value: Any, field_name: str | None = None) -> Any:
+        if isinstance(value, str):
+            if field_name in _RICH_TEXT_PLACEHOLDER_FIELDS:
+                rendered = value
+                for placeholder, replacement in values.items():
+                    rendered = rendered.replace(
+                        "{" + placeholder + "}",
+                        str(replacement),
+                    )
+                return rendered
+            return value
+        if isinstance(value, list):
+            return [visit(item, field_name) for item in value]
+        if isinstance(value, dict):
+            return {
+                key: visit(item, key)
+                for key, item in value.items()
+            }
+        return value
+
+    return visit(rich_message)
 
 
 def _message_entities(
@@ -412,11 +469,9 @@ def _message_edit_prompt(key: str) -> str:
         )
     return (
         "DUPLICATE WARNING — FORMATTED ARTICLE\n\n"
-        "ပြင်ဆင်ထားသော Article / Rich Text ကို Telegram မှတစ်ဆင့် ပို့နိုင်ပါတယ်။\n"
-        "Bold, Italic, Underline, Strikethrough, Spoiler, Link, Code, "
-        "Blockquote နဲ့ Custom Emoji formatting များကို ထိန်းသိမ်းပေးပါမယ်။\n"
-        "Telegram ရဲ့ text formatting ကို အသုံးပြုပြီး ပို့ပါ။ "
-        "Photo/Document caption ပို့ပါက caption စာသားနဲ့ formatting ကိုသာ သိမ်းပါမယ်။\n\n"
+        "Telegram Rich Message Article ကို တိုက်ရိုက်ပို့နိုင်ပါတယ်။ "
+        "Heading, Paragraph, List, Table, Quote, Code, Link, Button နဲ့ Rich Text formatting များကို ထိန်းသိမ်းပေးပါမယ်။\n"
+        "ပုံမှန် Bold/Italic Text နဲ့ Photo/Document Caption တွေလည်း လက်ခံပါတယ်။\n\n"
         "နောက်ဆုံးစစ်ဆေးသူနဲ့ Gmail အချက်အလက် ထည့်လိုပါက {details} ကို သုံးပါ။\n"
         "ဒီ placeholder နေရာမှာ Deposit နဲ့ Gmail လိုင်းတွေကို အလိုအလျောက် အစားထိုးပေးပါမယ်။"
     )
@@ -808,8 +863,44 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         DUPLICATE_WARNING_MESSAGE_KEY,
         CONTROL_PANEL_MESSAGE_KEY,
     }:
+        rich_message = _incoming_rich_message(message)
+        if rich_message is not None:
+            if message_key != DUPLICATE_WARNING_MESSAGE_KEY:
+                await message.reply_text(
+                    "Native Telegram Rich Messages are currently supported for Duplicate Warning only.",
+                    reply_markup=_message_edit_cancel_markup(),
+                )
+                return
+            context.user_data.pop("message_edit_mode", None)
+            repository: IDRepository = context.application.bot_data["repository"]
+            try:
+                repository.save_message_template(
+                    message_key,
+                    "",
+                    [],
+                    rich_message=rich_message,
+                )
+            except Exception:
+                context.user_data["message_edit_mode"] = message_key
+                LOGGER.exception("Database error while saving native Rich Message template")
+                await message.reply_text(
+                    "Unable to save this Rich Message right now.",
+                    reply_markup=_message_edit_cancel_markup(),
+                )
+                return
+            await message.reply_text(
+                "Duplicate Warning Article updated successfully.",
+                reply_markup=_control_panel_markup(),
+            )
+            return
+
         template_text = message.text if message.text is not None else message.caption
         if not isinstance(template_text, str) or not template_text.strip():
+            await message.reply_text(
+                "Please send a text message, formatted caption, or Telegram Rich Message Article.",
+                reply_markup=_message_edit_cancel_markup(),
+            )
+            context.user_data["message_edit_mode"] = message_key
             return
 
         context.user_data.pop("message_edit_mode", None)
@@ -1292,7 +1383,22 @@ async def handle_group_message(
         )
 
         try:
-            await message.reply_text(warning, entities=warning_entities)
+            rich_warning = warning_template.get("rich_message")
+            if isinstance(rich_warning, dict):
+                rendered_rich_warning = _render_rich_message_template(
+                    rich_warning,
+                    {"details": "\\n".join(details)},
+                )
+                await context.bot._post(
+                    "sendRichMessage",
+                    data={
+                        "chat_id": chat.id,
+                        "rich_message": rendered_rich_warning,
+                        "reply_parameters": {"message_id": message.message_id},
+                    },
+                )
+            else:
+                await message.reply_text(warning, entities=warning_entities)
         except Exception:
             # Preserve the previous ID state unless the warning was sent. The
             # processed-message claim remains, avoiding duplicate alerts if
