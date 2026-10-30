@@ -118,6 +118,30 @@ def test_same_id_in_a_new_group_message_is_still_a_duplicate() -> None:
     assert "Current:" not in warning
 
 
+def test_duplicate_warning_keeps_article_formatting_entities() -> None:
+    repository = _repository()
+    repository.save_message_template(
+        "duplicate_warning",
+        "Alert\n{details}",
+        [{"type": "bold", "offset": 0, "length": 5}],
+    )
+    context = _context(repository)
+    first_message = _update(message_id=10, update_id=100, value="formatted-123")
+    second_message = _update(message_id=11, update_id=101, value="formatted-123")
+
+    asyncio.run(handle_group_message(first_message, context))
+    asyncio.run(handle_group_message(second_message, context))
+
+    second_message.effective_message.reply_text.assert_awaited_once()
+    sent_text = second_message.effective_message.reply_text.await_args.args[0]
+    sent_entities = second_message.effective_message.reply_text.await_args.kwargs["entities"]
+    assert sent_text.startswith("Alert\nDeposit - @tester")
+    assert len(sent_entities) == 1
+    assert sent_entities[0].type == "bold"
+    assert sent_entities[0].offset == 0
+    assert sent_entities[0].length == 5
+
+
 def test_duplicate_warning_uses_previous_record_across_groups(monkeypatch) -> None:
     import handlers
 

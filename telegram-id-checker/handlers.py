@@ -290,9 +290,15 @@ def _control_panel_template(repository: IDRepository) -> dict[str, Any]:
     )
 
 
-def _message_entities(message: Any) -> list[dict[str, Any]]:
+def _message_entities(
+    message: Any,
+    *,
+    caption: bool = False,
+) -> list[dict[str, Any]]:
+    """Serialize Telegram formatting entities from text or a media caption."""
     serialized: list[dict[str, Any]] = []
-    for entity in getattr(message, "entities", None) or []:
+    entity_field = "caption_entities" if caption else "entities"
+    for entity in getattr(message, entity_field, None) or []:
         raw_entity = entity.to_dict()
         if raw_entity.get("type") == "text_mention":
             # The nested User object is not needed for this feature and is not
@@ -405,12 +411,14 @@ def _message_edit_prompt(key: str) -> str:
             "Emoji ID ကို ကိုယ်တိုင်ထည့်စရာမလိုပါ။"
         )
     return (
-        "DUPLICATE WARNING MESSAGE\n\n"
-        "ပြောင်းလဲလိုသော duplicate warning template ကို ပို့ပါ။ "
-        "စာသားနဲ့ Telegram animated/custom emoji ကို တစ်ခါတည်းထည့်နိုင်ပါတယ်။\n"
-        "Emoji ID ကို ကိုယ်တိုင်ထည့်စရာမလိုပါ။\n\n"
+        "DUPLICATE WARNING — FORMATTED ARTICLE\n\n"
+        "ပြင်ဆင်ထားသော Article / Rich Text ကို Telegram မှတစ်ဆင့် ပို့နိုင်ပါတယ်။\n"
+        "Bold, Italic, Underline, Strikethrough, Spoiler, Link, Code, "
+        "Blockquote နဲ့ Custom Emoji formatting များကို ထိန်းသိမ်းပေးပါမယ်။\n"
+        "Telegram ရဲ့ text formatting ကို အသုံးပြုပြီး ပို့ပါ။ "
+        "Photo/Document caption ပို့ပါက caption စာသားနဲ့ formatting ကိုသာ သိမ်းပါမယ်။\n\n"
         "နောက်ဆုံးစစ်ဆေးသူနဲ့ Gmail အချက်အလက် ထည့်လိုပါက {details} ကို သုံးပါ။\n"
-        "ဒီ placeholder ထဲမှာ Deposit နဲ့ Gmail လိုင်းတွေကို အလိုအလျောက် ထည့်ပေးပါမယ်။"
+        "ဒီ placeholder နေရာမှာ Deposit နဲ့ Gmail လိုင်းတွေကို အလိုအလျောက် အစားထိုးပေးပါမယ်။"
     )
 
 
@@ -766,14 +774,19 @@ async def _send_broadcast(
 
 
 async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Collect the next private text for message settings or a broadcast."""
+    """Collect private text, formatted message captions, or broadcast content."""
     if not await _is_panel_admin(update, context):
         return
     message = update.effective_message
-    if message is None or not message.text:
+    if message is None:
         return
 
-    if context.user_data.pop("checkid_mode", False):
+    # ID lookup and broadcast flows remain text-only. Message templates also
+    # accept captions so an admin can submit a formatted Article-style body.
+    if context.user_data.get("checkid_mode"):
+        if not message.text:
+            return
+        context.user_data.pop("checkid_mode", None)
         repository: IDRepository = context.application.bot_data["repository"]
         value = message.text.strip()
         if not value:
@@ -789,18 +802,24 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return
 
-    message_key = context.user_data.pop("message_edit_mode", None)
+    message_key = context.user_data.get("message_edit_mode")
     if message_key in {
         WELCOME_MESSAGE_KEY,
         DUPLICATE_WARNING_MESSAGE_KEY,
         CONTROL_PANEL_MESSAGE_KEY,
     }:
+        template_text = message.text if message.text is not None else message.caption
+        if not isinstance(template_text, str) or not template_text.strip():
+            return
+
+        context.user_data.pop("message_edit_mode", None)
         repository: IDRepository = context.application.bot_data["repository"]
+        is_caption = message.text is None
         try:
             repository.save_message_template(
                 message_key,
-                message.text,
-                _message_entities(message),
+                template_text,
+                _message_entities(message, caption=is_caption),
             )
         except Exception:
             context.user_data["message_edit_mode"] = message_key
@@ -820,6 +839,9 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             f"{label} updated successfully.",
             reply_markup=_control_panel_markup(),
         )
+        return
+
+    if not message.text:
         return
 
     mode = context.user_data.pop("broadcast_mode", None)
