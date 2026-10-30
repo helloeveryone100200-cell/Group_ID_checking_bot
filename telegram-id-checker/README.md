@@ -89,19 +89,23 @@ index. This prevents a redelivered Telegram update from incrementing an ID
 twice.
 
 A duplicate warning appears for every later check of the same ID, including
-checks by the same user in the same group. The warning uses one compact format:
-the first line says the client has already arrived, followed by `Deposit`
-(the Telegram username of the latest sender) and, only when supplied, `Gmail`
-(the Gmail field parsed from that message). It does not show First Seen,
-Current, or prior-user details. For forwarded messages, the forwarder is the
-current sender; the original author in `forward_origin` is not used as the
-latest checker. For anonymous/send-as-chat messages, Telegram's synthetic bot
-user is ignored in favor of `sender_chat`; Telegram does not expose the real
-administrator behind an anonymous sender. A duplicate updates the existing
-ID document's user, date, and Gmail in place; a missing Gmail clears the
-previous user's Gmail. No extra ID history documents are created. Dates are
-stored from the bot's UTC check time and formatted in `DISPLAY_TIMEZONE`
-(default `Asia/Bangkok`).
+checks by the same user in the same group. The warning is built from the
+previously stored record: `Deposit` shows the previous checker's Telegram
+username (or the stored display name when no username is available), and
+`Gmail` appears only when the previous record contains a Gmail value. The
+bot sends this warning before changing the ID record. Only after Telegram
+accepts the warning does the bot replace the record with the current sender,
+check time, and current message's Gmail; if the current message has no Gmail,
+the old Gmail field is removed. If sending the warning fails, the previous
+record is left unchanged. The handler serializes checks for the same ID
+within the running bot process so same-ID messages cannot overwrite one
+another out of order. For forwarded messages, the forwarder is the current
+sender; the original author in `forward_origin` is not used as the latest
+checker. For anonymous/send-as-chat messages, Telegram's synthetic bot user
+is ignored in favor of `sender_chat`; Telegram does not expose the real
+administrator behind an anonymous sender. No extra ID history documents are
+created. Dates are stored from the bot's UTC check time and formatted in
+`DISPLAY_TIMEZONE` (default `Asia/Bangkok`).
 
 Run the tests:
 
