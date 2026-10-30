@@ -88,15 +88,15 @@ from incrementing an ID twice.
 
 Duplicate warnings use a rolling comparison: `First Seen` displays the user
 and date stored before the current duplicate, while `Current` displays the
-sender and date from the check being processed now. The current date is based
-on the bot's UTC processing timestamp, so it reflects when the bot actually
-checks the ID (including messages that arrive as edits or forwards), and is
-formatted in `DISPLAY_TIMEZONE` (default `Asia/Bangkok`). Set this variable
-to another IANA timezone when needed. For messages sent on behalf of a group
-or channel, Telegram's `sender_chat` is used instead of its synthetic
-`from_user`; Telegram does not expose the real administrator behind an
-anonymous sender. After the warning is prepared, the ID record keeps the
-newest sender/date for the next duplicate.
+person who sent the message into the monitored group and the time the bot
+checked it. For forwarded messages, the forwarder is the current sender;
+Telegram's `forward_origin` describes the original author and is not used as
+the current user. The current date is based on the bot's UTC processing
+timestamp and is formatted in `DISPLAY_TIMEZONE` (default `Asia/Bangkok`).
+For anonymous or send-as-chat messages, Telegram's synthetic bot user is
+ignored in favor of `sender_chat`; Telegram does not expose the real
+administrator behind an anonymous sender. After the warning is prepared, the
+ID record keeps the newest sender/date for the next duplicate.
 
 Run the tests:
 
