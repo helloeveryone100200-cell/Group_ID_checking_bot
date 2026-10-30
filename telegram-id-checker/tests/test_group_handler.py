@@ -360,7 +360,7 @@ def test_forwarded_message_records_forwarder_not_original_author(monkeypatch) ->
 
     forwarded.effective_message.reply_text.assert_awaited_once()
     warning = forwarded.effective_message.reply_text.await_args.args[0]
-    assert warning.endswith("Deposit - @userB")
+    assert warning.endswith("Deposit - @userA")
     assert "First Seen" not in warning
     assert "Current:" not in warning
 
