@@ -59,12 +59,12 @@ def test_duplicate_warning_editor_saves_formatted_article_entities() -> None:
     context = _context(repository, admin_ids=frozenset({100}))
     context.user_data["message_edit_mode"] = "duplicate_warning"
     bold_entity = SimpleNamespace(
-        to_dict=lambda: {"type": "bold", "offset": 0, "length": 10}
+        to_dict=lambda: {"type": "bold", "offset": 0, "length": 9}
     )
     link_entity = SimpleNamespace(
         to_dict=lambda: {
             "type": "text_link",
-            "offset": 11,
+            "offset": 10,
             "length": 4,
             "url": "https://example.com",
         }
@@ -83,7 +83,7 @@ def test_duplicate_warning_editor_saves_formatted_article_entities() -> None:
     assert saved is not None
     assert saved["text"] == "DUPLICATE\nLink\n{details}"
     assert saved["entities"] == [
-        {"type": "bold", "offset": 0, "length": 10},
+        {"type": "bold", "offset": 0, "length": 9},
         {
             "type": "text_link",
             "offset": 11,
