@@ -54,6 +54,71 @@ def _repository() -> IDRepository:
     return repository
 
 
+def test_duplicate_warning_editor_saves_formatted_article_entities() -> None:
+    repository = _repository()
+    context = _context(repository, admin_ids=frozenset({100}))
+    context.user_data["message_edit_mode"] = "duplicate_warning"
+    bold_entity = SimpleNamespace(
+        to_dict=lambda: {"type": "bold", "offset": 0, "length": 10}
+    )
+    link_entity = SimpleNamespace(
+        to_dict=lambda: {
+            "type": "text_link",
+            "offset": 11,
+            "length": 4,
+            "url": "https://example.com",
+        }
+    )
+    message = SimpleNamespace(
+        text="DUPLICATE\nLink\n{details}",
+        caption=None,
+        entities=[bold_entity, link_entity],
+        caption_entities=None,
+        reply_text=AsyncMock(),
+    )
+
+    asyncio.run(handle_admin_text(_update(100, message), context))
+
+    saved = repository.get_message_template("duplicate_warning")
+    assert saved is not None
+    assert saved["text"] == "DUPLICATE\nLink\n{details}"
+    assert saved["entities"] == [
+        {"type": "bold", "offset": 0, "length": 10},
+        {
+            "type": "text_link",
+            "offset": 11,
+            "length": 4,
+            "url": "https://example.com",
+        },
+    ]
+    assert "message_edit_mode" not in context.user_data
+    assert "updated successfully" in message.reply_text.await_args.args[0]
+
+
+def test_duplicate_warning_editor_accepts_formatted_article_caption() -> None:
+    repository = _repository()
+    context = _context(repository, admin_ids=frozenset({100}))
+    context.user_data["message_edit_mode"] = "duplicate_warning"
+    italic_entity = SimpleNamespace(
+        to_dict=lambda: {"type": "italic", "offset": 0, "length": 7}
+    )
+    message = SimpleNamespace(
+        text=None,
+        caption="Article\n{details}",
+        entities=None,
+        caption_entities=[italic_entity],
+        reply_text=AsyncMock(),
+    )
+
+    asyncio.run(handle_admin_text(_update(100, message), context))
+
+    saved = repository.get_message_template("duplicate_warning")
+    assert saved is not None
+    assert saved["text"] == "Article\n{details}"
+    assert saved["entities"] == [{"type": "italic", "offset": 0, "length": 7}]
+    assert "updated successfully" in message.reply_text.await_args.args[0]
+
+
 def test_control_panel_is_only_sent_to_admins() -> None:
     repository = _repository()
     admin_message = SimpleNamespace(reply_text=AsyncMock())
