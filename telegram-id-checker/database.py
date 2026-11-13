@@ -307,6 +307,20 @@ class IDRepository:
             record["gmail"] = metadata.gmail
         return record
 
+    def insert_new_occurrence(self, metadata: OccurrenceMetadata) -> bool:
+        """Insert a first-seen ID without ever modifying an existing record.
+
+        Returns False when another worker already inserted the same globally
+        unique ID. The caller must then read that existing record and complete
+        the duplicate-warning flow before updating its latest state.
+        """
+        primary = self._record_from_metadata(metadata)
+        try:
+            self.id_records.insert_one(primary)
+        except DuplicateKeyError:
+            return False
+        return True
+
     def record_occurrence(self, metadata: OccurrenceMetadata) -> RecordResult:
         """Create a record or atomically replace its current user and date."""
         primary = self._record_from_metadata(metadata)

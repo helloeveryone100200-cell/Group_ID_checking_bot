@@ -1324,25 +1324,45 @@ async def handle_group_message(
             LOGGER.exception("Database error while reading an existing ID record")
             return
 
-        record_updated = False
         if previous_record is None:
-            # First sighting: store the ID without sending a duplicate warning.
+            # Insert-only first sighting. A competing process may have inserted
+            # this ID after our initial read; in that case, do not update it.
+            # Re-read the record and continue through the normal duplicate
+            # warning path so the ID state is changed only after Telegram accepts
+            # the warning.
             try:
-                result = repository.record_occurrence(metadata)
+                inserted = repository.insert_new_occurrence(metadata)
             except Exception:
                 _release_group_message_claim(repository, chat_id, message_id)
-                LOGGER.exception("Database error while recording a new ID")
+                LOGGER.exception("Database error while inserting a new ID")
                 return
 
-            if result.is_new:
+            if inserted:
                 LOGGER.info("New ID detected in chat_id=%s", chat.id)
                 return
 
-            # Recovery path for an ID inserted concurrently by another process.
-            # record_occurrence has already updated it, but its atomic result
-            # still gives us the record that existed immediately beforehand.
-            previous_record = result.previous_record or {}
-            record_updated = True
+            try:
+                previous_record = repository.find_by_id(parsed.value)
+            except Exception:
+                _release_group_message_claim(repository, chat_id, message_id)
+                LOGGER.exception(
+                    "Database error while re-reading an ID after a concurrent insert"
+                )
+                return
+
+            if previous_record is None:
+                # The competing record was removed between the duplicate-key
+                # result and the re-read (for example, by an admin clear).
+                # Release the message claim so Telegram can safely retry it.
+                _release_group_message_claim(repository, chat_id, message_id)
+                LOGGER.warning(
+                    "ID record disappeared after a concurrent insert "
+                    "chat_id=%s message_id=%s id=%s",
+                    chat.id,
+                    message.message_id,
+                    parsed.value,
+                )
+                return
 
         # Build the warning exclusively from the record that existed before
         # this submission. In particular, never use this message's Gmail here.
@@ -1407,17 +1427,16 @@ async def handle_group_message(
             LOGGER.exception("Telegram error while sending duplicate warning")
             return
 
-        if not record_updated:
-            # Only after Telegram accepts the warning do we replace the latest
-            # user/date/Gmail and increment occurrence_count in the same ID row.
-            try:
-                repository.record_occurrence(metadata)
-            except Exception:
-                LOGGER.exception(
-                    "Database error while updating ID after duplicate warning "
-                    "was sent"
-                )
-                return
+        # Only after Telegram accepts the warning do we replace the latest
+        # user/date/Gmail and increment occurrence_count in the same ID row.
+        try:
+            repository.record_occurrence(metadata)
+        except Exception:
+            LOGGER.exception(
+                "Database error while updating ID after duplicate warning "
+                "was sent"
+            )
+            return
 
         LOGGER.info("Duplicate detected in chat_id=%s", chat.id)
 

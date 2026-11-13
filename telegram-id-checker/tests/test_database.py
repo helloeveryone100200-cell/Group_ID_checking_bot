@@ -50,6 +50,31 @@ def test_one_record_is_updated_for_repeated_checks(repository: IDRepository) -> 
     assert record["occurrence_count"] == 2
 
 
+def test_insert_new_occurrence_never_rewrites_existing_record(
+    repository: IDRepository,
+) -> None:
+    first = _metadata(
+        "insert-only-123",
+        "1",
+        username="userA",
+        gmail="old@example.com",
+    )
+    duplicate = _metadata(
+        "insert-only-123",
+        "2",
+        username="userB",
+        gmail="new@example.com",
+    )
+
+    assert repository.insert_new_occurrence(first) is True
+    assert repository.insert_new_occurrence(duplicate) is False
+
+    record = repository.find_by_id("insert-only-123")
+    assert record["user"] == "@userA"
+    assert record["gmail"] == "old@example.com"
+    assert record["occurrence_count"] == 1
+
+
 def test_previous_user_is_returned_before_each_duplicate_update(
     repository: IDRepository,
 ) -> None:

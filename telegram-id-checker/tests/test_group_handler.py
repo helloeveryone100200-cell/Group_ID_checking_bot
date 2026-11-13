@@ -315,6 +315,129 @@ def test_warning_uses_previous_gmail_then_clears_it_after_send(monkeypatch) -> N
     assert "gmail" not in final_record
 
 
+def test_concurrent_insert_fallback_sends_warning_before_updating_record(monkeypatch) -> None:
+    import handlers
+
+    repository = _repository()
+    context = _context(repository)
+    original_date = datetime(2026, 11, 12, 8, 0)
+    repository.id_records.insert_one(
+        {
+            "id": "concurrent-insert-123",
+            "user": "@concurrent_user",
+            "date": original_date,
+            "occurrence_count": 1,
+            "gmail": "previous@example.com",
+        }
+    )
+
+    original_find = repository.find_by_id
+    find_calls = 0
+
+    def simulate_stale_initial_read(value: str):
+        nonlocal find_calls
+        find_calls += 1
+        if find_calls == 1:
+            # Another process inserts the ID immediately after this read.
+            return None
+        return original_find(value)
+
+    monkeypatch.setattr(repository, "find_by_id", simulate_stale_initial_read)
+    monkeypatch.setattr(
+        handlers,
+        "utc_now",
+        lambda: datetime(2026, 11, 13, 9, 0, tzinfo=timezone.utc),
+    )
+
+    duplicate = _update(
+        message_id=450,
+        update_id=550,
+        value="concurrent-insert-123",
+        username="current_user",
+        gmail="current@example.com",
+    )
+    records_at_send_time = []
+
+    async def inspect_record_before_send(*args, **kwargs):
+        records_at_send_time.append(original_find("concurrent-insert-123"))
+
+    duplicate.effective_message.reply_text.side_effect = inspect_record_before_send
+    asyncio.run(handle_group_message(duplicate, context))
+
+    assert find_calls == 2
+    assert duplicate.effective_message.reply_text.await_count == 1
+    warning = duplicate.effective_message.reply_text.await_args.args[0]
+    assert "Deposit - @concurrent_user" in warning
+    assert "Gmail - previous@example.com" in warning
+    assert records_at_send_time == [
+        {
+            "id": "concurrent-insert-123",
+            "user": "@concurrent_user",
+            "date": original_date,
+            "occurrence_count": 1,
+            "gmail": "previous@example.com",
+        }
+    ]
+
+    final_record = original_find("concurrent-insert-123")
+    assert final_record["user"] == "@current_user"
+    assert final_record["gmail"] == "current@example.com"
+    assert final_record["occurrence_count"] == 2
+
+
+def test_concurrent_insert_fallback_send_failure_preserves_existing_record(monkeypatch) -> None:
+    import handlers
+
+    repository = _repository()
+    context = _context(repository)
+    original_date = datetime(2026, 11, 12, 8, 0)
+    repository.id_records.insert_one(
+        {
+            "id": "concurrent-failure-123",
+            "user": "@concurrent_user",
+            "date": original_date,
+            "occurrence_count": 1,
+            "gmail": "previous@example.com",
+        }
+    )
+
+    original_find = repository.find_by_id
+    find_calls = 0
+
+    def simulate_stale_initial_read(value: str):
+        nonlocal find_calls
+        find_calls += 1
+        if find_calls == 1:
+            return None
+        return original_find(value)
+
+    monkeypatch.setattr(repository, "find_by_id", simulate_stale_initial_read)
+    monkeypatch.setattr(
+        handlers,
+        "utc_now",
+        lambda: datetime(2026, 11, 13, 9, 0, tzinfo=timezone.utc),
+    )
+
+    duplicate = _update(
+        message_id=451,
+        update_id=551,
+        value="concurrent-failure-123",
+        username="current_user",
+        gmail="current@example.com",
+    )
+    duplicate.effective_message.reply_text.side_effect = RuntimeError(
+        "Telegram send failed"
+    )
+    asyncio.run(handle_group_message(duplicate, context))
+
+    record = original_find("concurrent-failure-123")
+    assert find_calls == 2
+    assert record["user"] == "@concurrent_user"
+    assert record["date"] == original_date
+    assert record["gmail"] == "previous@example.com"
+    assert record["occurrence_count"] == 1
+
+
 def test_failed_duplicate_warning_does_not_rewrite_current_record(monkeypatch) -> None:
     import handlers
 
