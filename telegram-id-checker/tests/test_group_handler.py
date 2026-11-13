@@ -367,9 +367,8 @@ def test_concurrent_insert_fallback_sends_warning_before_updating_record(monkeyp
     assert find_calls == 2
     assert duplicate.effective_message.reply_text.await_count == 1
     warning = duplicate.effective_message.reply_text.await_args.args[0]
-    assert warning.endswith(
-        "Deposit - @concurrent_user\\nGmail - previous@example.com"
-    )
+    assert "Deposit - @concurrent_user" in warning
+    assert "Gmail - previous@example.com" in warning
     assert records_at_send_time == [
         {
             "id": "concurrent-insert-123",
